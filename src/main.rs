@@ -11,14 +11,12 @@ use hittable::Hittable;
 use hittable_list::HittableList;
 
 fn write_color(pixel_color: Vec3) {
-    // Convert the pixel color to RGB values (0 to 255)
     let r = (pixel_color.x * 255.0).clamp(0.0, 255.0) as u8;
     let g = (pixel_color.y * 255.0).clamp(0.0, 255.0) as u8;
     let b = (pixel_color.z * 255.0).clamp(0.0, 255.0) as u8;
 
-    let chars = [' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
-    let index = ((brightness * (chars.len() - 1) as f64) as usize).min(chars.len() - 1);
-    print!("{}", chars[index]);
+    // Print the color with ANSI
+    print!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b);
 }
     
 fn main() {
@@ -32,11 +30,13 @@ fn main() {
     let mut world = HittableList::new();
     
     // Add a center sphere
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5)));
-    world.add(Box::new(Sphere::new(Vec3::new(-1.0, -0.1, -1.0), 0.2)));
+    world.add(Box::new(Sphere::new(Vec3::new(0.0, 0.0, -2.5), 1.0)));
+    // Add another sphere to the left
+    world.add(Box::new(Sphere::new(Vec3::new(-1.0, -0.1, -1.5), 0.4)));
+    world.add(Box::new(Sphere::new(Vec3::new(2.0, -0.0, -2.0), 0.7)));
 
     // Add a floor (large sphere)
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
+    world.add(Box::new(Sphere::new(Vec3::new(0.0, -201.0, -2.0), 200.0)));
 
 
     for j in (0..height).rev() {
@@ -44,7 +44,7 @@ fn main() {
             let u = i as f64 / (width - 1) as f64;
             let v = j as f64 / (height - 1) as f64;
 
-            let pixel_aspect = 2.0;
+            let pixel_aspect = 1.8;
             let viewport_x = aspect_ratio * (2.0 * u - 1.0);
             let viewport_y = (2.0 * v - 1.0) * pixel_aspect;
 
