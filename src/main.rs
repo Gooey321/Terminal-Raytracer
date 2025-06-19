@@ -26,7 +26,7 @@ fn main() {
     world.add(Box::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
     
     // Add a few more spheres for interest
-    world.add(Box::new(Sphere::new(Vec3::new(-1.0, 0.0, -1.0), 0.5)));
+    world.add(Box::new(Sphere::new(Vec3::new(-1.0, -0.1, -1.0), 0.2)));
     // world.add(Box::new(Sphere::new(Vec3::new(1.0, 0.0, -1.0), 0.5)));
 
     for j in (0..height).rev() {
@@ -47,7 +47,22 @@ fn main() {
             // Now hit against the entire world
             if let Some(hit_record) = world.hit(&ray, 0.001, f64::INFINITY) {
                 let light_dir = Vec3::new(-1.0, 1.0, 1.0).normalize();
-                let brightness = hit_record.normal.dot(&light_dir).max(0.0);
+
+                let shadow_origin = hit_record.p + hit_record.normal * 1e-4;
+                let shadow_ray = Ray {
+                    origin: shadow_origin,
+                    direction: light_dir,
+                };
+
+                // If the shadow hits something then that point is in shadow.
+                let in_shadow = world.hit(&shadow_ray, 0.001, f64::INFINITY).is_some();
+
+                let brightness = if in_shadow {
+                    0.0
+                } else {
+                    hit_record.normal.dot(&light_dir).max(0.0)
+                };
+
                 let chars = [' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
                 let index = ((brightness * (chars.len() - 1) as f64) as usize).min(chars.len() - 1);
                 print!("{}", chars[index]);
