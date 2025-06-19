@@ -10,24 +10,34 @@ use sphere::Sphere;
 use hittable::Hittable;
 use hittable_list::HittableList;
 
+fn write_color(pixel_color: Vec3) {
+    // Convert the pixel color to RGB values (0 to 255)
+    let r = (pixel_color.x * 255.0).clamp(0.0, 255.0) as u8;
+    let g = (pixel_color.y * 255.0).clamp(0.0, 255.0) as u8;
+    let b = (pixel_color.z * 255.0).clamp(0.0, 255.0) as u8;
+
+    let chars = [' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
+    let index = ((brightness * (chars.len() - 1) as f64) as usize).min(chars.len() - 1);
+    print!("{}", chars[index]);
+}
+    
 fn main() {
-    let width = 200;
-    let height = 100;
+    // Set the dimensions of the image
+    let width = 400;
+    let height = 200;
 
     let aspect_ratio = width as f64 / height as f64;
 
-    // Create a world with multiple objects
+    // Create a world
     let mut world = HittableList::new();
     
     // Add a center sphere
     world.add(Box::new(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5)));
-    
-    // Add a ground sphere (large sphere below)
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
-    
-    // Add a few more spheres for interest
     world.add(Box::new(Sphere::new(Vec3::new(-1.0, -0.1, -1.0), 0.2)));
-    // world.add(Box::new(Sphere::new(Vec3::new(1.0, 0.0, -1.0), 0.5)));
+
+    // Add a floor (large sphere)
+    world.add(Box::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
+
 
     for j in (0..height).rev() {
         for i in 0..width {
@@ -44,7 +54,8 @@ fn main() {
                 direction,
             };
 
-            // Now hit against the entire world
+            let black = Vec3::new(0.0, 0.0, 0.0);
+
             if let Some(hit_record) = world.hit(&ray, 0.001, f64::INFINITY) {
                 let light_dir = Vec3::new(-1.0, 1.0, 1.0).normalize();
 
@@ -54,20 +65,18 @@ fn main() {
                     direction: light_dir,
                 };
 
-                // If the shadow hits something then that point is in shadow.
                 let in_shadow = world.hit(&shadow_ray, 0.001, f64::INFINITY).is_some();
 
-                let brightness = if in_shadow {
-                    0.0
-                } else {
-                    hit_record.normal.dot(&light_dir).max(0.0)
-                };
+                let mut brightness = hit_record.normal.dot(&light_dir).max(0.0);
+                if in_shadow {
+                    brightness *= 0.2; // Dim if in shadow
+                }
 
-                let chars = [' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
-                let index = ((brightness * (chars.len() - 1) as f64) as usize).min(chars.len() - 1);
-                print!("{}", chars[index]);
+                let pixel_color = Vec3::new(brightness, brightness, brightness);
+                write_color(pixel_color);
             } else {
-                print!(" ");
+                // If no hit, write black
+                write_color(black);
             }
         }
         println!();
