@@ -6,13 +6,15 @@ use crate::hittable::{HitRecord, Hittable};
 pub struct Sphere {
     pub center: Vec3,
     pub radius: f64,
+    pub color: Vec3, // Colour of the sphere.
 }
 
 impl Sphere {
-    pub fn new(center: Vec3, radius: f64) -> Self {
+    pub fn new(center: Vec3, radius: f64, color: Vec3) -> Self {
         Self {
             center,
             radius: radius.max(0.0),
+            color,
         }
     }
 }
@@ -49,6 +51,7 @@ impl Hittable for Sphere {
             normal: outward_normal,
             t,
             front_face: false,
+            color: self.color,
         };
 
         hit_record.set_face_normal(ray, outward_normal);

@@ -8,6 +8,7 @@ pub struct HitRecord {
     pub normal: Vec3,
     pub t: f64,
     pub front_face: bool,
+    pub color: Vec3,
 }
 
 impl HitRecord {
@@ -21,5 +22,5 @@ impl HitRecord {
     }
 }
 pub trait Hittable {
-    fn hit(&self, ray: &Ray, t_min: f64, t_max: f64) -> Option<HitRecord>; // Fixed: t_tmin -> t_min
+    fn hit(&self, ray: &Ray, t_min: f64, t_max: f64) -> Option<HitRecord>;
 }

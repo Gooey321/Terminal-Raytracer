@@ -30,14 +30,13 @@ fn main() {
     let mut world = HittableList::new();
     
     // Add a center sphere
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, 0.0, -2.5), 1.0)));
+    world.add(Box::new(Sphere::new(Vec3::new(0.0, 0.0, -2.5), 1.0, Vec3::new(1.0, 0.0, 0.0))));
     // Add another sphere to the left
-    world.add(Box::new(Sphere::new(Vec3::new(-1.0, -0.1, -1.5), 0.4)));
-    world.add(Box::new(Sphere::new(Vec3::new(2.0, -0.0, -2.0), 0.7)));
+    world.add(Box::new(Sphere::new(Vec3::new(-1.0, -0.1, -1.5), 0.4, Vec3::new(0.0, 1.0, 0.0))));
+    world.add(Box::new(Sphere::new(Vec3::new(2.0, -0.0, -2.0), 0.7, Vec3::new(0.0, 0.0, 1.0))));
 
     // Add a floor (large sphere)
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, -201.0, -2.0), 200.0)));
-
+    world.add(Box::new(Sphere::new(Vec3::new(0.0, -201.0, -2.0), 200.0, Vec3::new(0.5, 0.5, 0.5))));
 
     for j in (0..height).rev() {
         for i in 0..width {
@@ -72,7 +71,7 @@ fn main() {
                     brightness *= 0.2; // Dim if in shadow
                 }
 
-                let pixel_color = Vec3::new(brightness, brightness, brightness);
+                let pixel_color = hit_record.color * brightness;
                 write_color(pixel_color);
             } else {
                 // If no hit, write black
