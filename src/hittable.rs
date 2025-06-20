@@ -9,6 +9,7 @@ pub struct HitRecord {
     pub t: f64,
     pub front_face: bool,
     pub color: Vec3,
+    pub emission: Vec3,
 }
 
 impl HitRecord {

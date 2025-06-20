@@ -7,6 +7,7 @@ pub struct Sphere {
     pub center: Vec3,
     pub radius: f64,
     pub color: Vec3, // Colour of the sphere.
+    pub emission: Vec3,
 }
 
 impl Sphere {
@@ -15,6 +16,16 @@ impl Sphere {
             center,
             radius: radius.max(0.0),
             color,
+            emission: Vec3::new(0.0, 0.0, 0.0),
+        }
+    }
+
+    pub fn new_emissive(center: Vec3, radius: f64, color: Vec3, emission: Vec3) -> Self {
+        Self {
+            center,
+            radius,
+            color,
+            emission,
         }
     }
 }
@@ -52,6 +63,7 @@ impl Hittable for Sphere {
             t,
             front_face: false,
             color: self.color,
+            emission: self.emission,
         };
 
         hit_record.set_face_normal(ray, outward_normal);

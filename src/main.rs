@@ -33,15 +33,37 @@ fn main() {
 
     // Create a world
     let mut world = HittableList::new();
-    
-    // Add a center sphere
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, 0.0, -10.5), 1.0, Vec3::new(1.0, 0.0, 0.0))));
-    // Add another sphere to the left
-    world.add(Box::new(Sphere::new(Vec3::new(-1.0, -0.1, -5.5), 0.4, Vec3::new(0.0, 1.0, 0.0))));
-    world.add(Box::new(Sphere::new(Vec3::new(2.0, -0.0, -10.0), 0.7, Vec3::new(0.3, 0.3, 1.0))));
 
-    // Add a floor (large sphere)
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, -201.0, -10.0), 200.0, Vec3::new(0.5, 0.5, 0.5))));
+    // Left wall (red)
+    world.add(Box::new(Sphere::new(Vec3::new(-1001.0, 0.0, -3.0), 1000.0, Vec3::new(0.75, 0.25, 0.25))));
+
+    // Right wall (green)  
+    world.add(Box::new(Sphere::new(Vec3::new(1001.0, 0.0, -3.0), 1000.0, Vec3::new(0.25, 0.75, 0.25))));
+
+    // Back wall (white)
+    world.add(Box::new(Sphere::new(Vec3::new(0.0, 0.0, -1004.0), 1000.0, Vec3::new(0.75, 0.75, 0.75))));
+
+    // Floor (white)
+    world.add(Box::new(Sphere::new(Vec3::new(0.0, -1001.0, -3.0), 1000.0, Vec3::new(0.75, 0.75, 0.75))));
+
+    // Ceiling (white)
+    world.add(Box::new(Sphere::new(Vec3::new(0.0, 1001.0, -3.0), 1000.0, Vec3::new(0.75, 0.75, 0.75))));
+
+    // Two boxes (represented as spheres for now)
+
+    // Left box (tall, white)
+    world.add(Box::new(Sphere::new(Vec3::new(-0.5, -0.4, -2.5), 0.6, Vec3::new(0.75, 0.75, 0.75))));
+
+    // Right box (short, white)  
+    world.add(Box::new(Sphere::new(Vec3::new(0.5, -0.7, -3.2), 0.3, Vec3::new(0.75, 0.75, 0.75))));
+    
+    // Add a ceiling light (area light simulation)
+    world.add(Box::new(Sphere::new_emissive(
+        Vec3::new(0.0, 0.8, -3.0),    // Position: near ceiling
+        0.3,                           // Small radius
+        Vec3::new(1.0, 1.0, 1.0),     // White color
+        Vec3::new(3.0, 3.0, 3.0)      // Bright white emission
+    )));
 
     for j in (0..height).rev() {
         for i in 0..width {
@@ -64,34 +86,43 @@ fn main() {
                 direction,
             };
 
-            let black = Vec3::new(0.0, 0.0, 0.0);
-
             if let Some(hit_record) = world.hit(&ray, 0.001, f64::INFINITY) {
-                let light_dir = Vec3::new(-1.0, 1.0, 1.0).normalize();
+                let pixel_color = hit_record.emission;
+                
+                let light_pos = Vec3::new(0.0, 0.8, -3.0); 
+                let light_emission = Vec3::new(3.0, 3.0, 3.0); // Emission color of the light source
 
-                let shadow_origin = hit_record.p + hit_record.normal * 1e-4;
+                let light_dir = (light_pos - hit_record.p).normalize();
+                let distance_to_light = (light_pos - hit_record.p).length();
+
                 let shadow_ray = Ray {
-                    origin: shadow_origin,
+                    origin: hit_record.p + hit_record.normal * 1e-4,
                     direction: light_dir,
                 };
 
-                let in_shadow = world.hit(&shadow_ray, 0.001, f64::INFINITY).is_some();
-
-                let mut brightness = hit_record.normal.dot(&light_dir).max(0.0);
-                if in_shadow {
-                    brightness *= 0.2;
+                let mut in_shadow = false;
+                if let Some(shadow_hit) = world.hit(&shadow_ray, 0.001, distance_to_light - 0.001) {
+                    if shadow_hit.emission.length_squared() < 0.01 {
+                        in_shadow = true;
+                    }
                 }
 
-                // Add ambient lighting to make colors pop
-                brightness += 0.4; // Increase this value for brighter colors
-                brightness = brightness.min(1.0); // Clamp to prevent over-brightening
+                let mut direct_light = Vec3::new(0.0, 0.0, 0.0);
+                if !in_shadow {
+                    let brightness = hit_record.normal.dot(&light_dir).max(0.0);
+                    let attenuation = 1.0 / (1.0 + distance_to_light * distance_to_light * 0.05);
+                    direct_light = light_emission * brightness * attenuation;
+                }
 
-                let pixel_color = hit_record.color * brightness;
+                let ambient_light = Vec3::new(1.0, 1.0, 1.0) * 0.5;
 
-                write_color(pixel_color);
+                let surface_color = hit_record.color * (direct_light + ambient_light);
+                let final_color = pixel_color + surface_color;
+
+                write_color(final_color);
             } else {
                 // If no hit, write black
-                write_color(black);
+                write_color(Vec3::new(0.0, 0.0, 0.0));
             }
         }
         println!();
