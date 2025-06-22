@@ -29,6 +29,10 @@ impl Vec3 {
         let len = self.length();
         (*self) / len
     }
+
+    pub fn reflect(&self, normal: &Vec3) -> Vec3 {
+        *self - *normal * 2.0 * self.dot(normal)
+    }
 }
 
 impl Add for Vec3 {
