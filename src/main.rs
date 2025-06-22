@@ -91,11 +91,11 @@ fn ray_color(ray: &Ray, world: &HittableList, depth: i32) -> Vec3 {
 
 
 fn write_color(pixel_color: Vec3, full_color: bool) {
-    let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-    let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-    let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+    let r = (pixel_color.x * 255.0).clamp(0.0, 255.0) as u8;
+    let g = (pixel_color.y * 255.0).clamp(0.0, 255.0) as u8;
+    let b = (pixel_color.z * 255.0).clamp(0.0, 255.0) as u8;
 
-    let brightness = 0.2126 * pixel_color.x.sqrt() + 0.7152 * pixel_color.y.sqrt() + 0.0722 * pixel_color.z.sqrt();
+    let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
 
     if full_color {
         print!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b);
