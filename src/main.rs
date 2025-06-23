@@ -1,213 +1,217 @@
 mod vec3;
-mod ray;
 mod sphere;
-mod hittable;
-mod hittable_list;
 
-use core::f64;
 use std::time::Instant;
 use vec3::Vec3;
-use ray::Ray;
 use sphere::Sphere;
-use hittable::Hittable;
-use hittable_list::HittableList;
-use rand::Rng;
-use rayon::prelude::*;
+use bytemuck::{Pod, Zeroable};
+use wgpu::util::DeviceExt;
 
-const MAX_DEPTH: i32 = 8; // Maximum recursion depth for reflections
-const SAMPLES_PER_PIXEL: i32 = 256; // Use a moderate number of samples for a good balance
+const MAX_DEPTH: u32 = 4;
+const SAMPLES_PER_PIXEL: u32 = 256;
+const FRAMES_TO_ACCUMULATE: u32 = 128;
 
-#[derive(Clone, Copy)]
-struct Light {
-    center: Vec3,
-    radius: f64,
-    emission: Vec3,
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct Uniforms {
+    width: u32,
+    height: u32,
+    samples_per_pixel: u32,
+    max_depth: u32,
+    seed: u32,
+    frame_number: u32,
+    _padding1: u32,
+    _padding2: u32,
+    aspect_ratio: f32,
+    char_aspect_ratio: f32,
+    fov_rad: f32,
+    _padding3: f32,
 }
-
-impl Light {
-    fn new(center: Vec3, radius: f64, emission: Vec3) -> Self {
-        Light { center, radius, emission }
-    }
-}
-
-fn ray_color(ray: &Ray, world: &HittableList, depth: i32, lights: &[Light]) -> Vec3 {
-    // If we've exceeded the ray bounce limit, no more light is gathered.
-    if depth <= 0 {
-        return Vec3::new(0.0, 0.0, 0.0);
-    }
-
-    if let Some(hit_record) = world.hit(ray, 0.001, f64::INFINITY) {
-        let emission = hit_record.emission;
-        let mut total_direct_light = Vec3::new(0.0, 0.0, 0.0);
-        let mut rng = rand::thread_rng(); // Move RNG creation here
-
-        // Calculate lighting from ALL lights in the list
-        for light in lights {
-            let shadow_samples = 64; // Increased for cleaner shadows
-            let mut visibility = 0.0;
-
-            // Calculate direct lighting for this specific light
-            for _ in 0..shadow_samples {
-                let u1 = rng.r#gen::<f64>();
-                let u2 = rng.r#gen::<f64>();
-
-                let z = 1.0 - 2.0 * u1;
-                let r = (1.0 - z * z).sqrt();
-                let phi = 2.0 * std::f64::consts::PI * u2;
-
-
-                // Generate a random point on this light's surface
-                let rand_vec = Vec3::new(r * phi.cos(), r * phi.sin(), z);
-                let rand_light_point = light.center + rand_vec * light.radius;
-
-                // Cast a shadow ray towards that random point
-                let shadow_ray_orig = hit_record.p + hit_record.normal * 1e-4;
-                let light_dir = rand_light_point - shadow_ray_orig;
-                let distance_light = light_dir.length();
-
-                let shadow_ray = Ray {
-                    origin: shadow_ray_orig,
-                    direction: light_dir.normalize(),
-                };
-
-                // Check if the path is obstructed
-                if world.hit(&shadow_ray, 0.001, distance_light - 0.001).is_none() {
-                    visibility += 1.0;
-                }
-            }
-
-            let average_visibility = visibility / shadow_samples as f64;
-            // Add this light's contribution to the total
-            total_direct_light = total_direct_light + light.emission * average_visibility;
-        }
-
-        let ambient_light = Vec3::new(1.0, 1.0, 1.0) * 0.1; // Reduced for better contrast
-        let surface_color = hit_record.color * (total_direct_light + ambient_light);
-
-        // Only calculate reflections if reflectivity is significant
-        let reflected_color = if hit_record.reflectivity > 0.01 {
-            let reflected_ray = Ray {
-                origin: hit_record.p + hit_record.normal * 1e-4,
-                direction: ray.direction.reflect(&hit_record.normal),
-            };
-            ray_color(&reflected_ray, world, depth - 1, lights) * hit_record.reflectivity
-        } else {
-            Vec3::new(0.0, 0.0, 0.0)
-        };
-
-        let final_color = surface_color * (1.0 - hit_record.reflectivity) + reflected_color;
-
-        return emission + final_color;
-    }
-
-    // If no hit, return black
-    Vec3::new(0.0, 0.0, 0.0)
-}
-
 
 fn write_color(pixel_color: Vec3, full_color: bool) {
-    let r = (pixel_color.x * 255.0).clamp(0.0, 255.0) as u8;
-    let g = (pixel_color.y * 255.0).clamp(0.0, 255.0) as u8;
-    let b = (pixel_color.z * 255.0).clamp(0.0, 255.0) as u8;
+    let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+    let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+    let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
 
     let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
 
     if full_color {
         print!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b);
     } else {
-        let chars = [' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
-        let index = ((brightness * (chars.len() - 1) as f64) as usize).min(chars.len() - 1);
-
-        // Print the color with ANSI
+        let chars = ['@', '%', '#', 'a', '*', '+', '=', '-', ':', '.', '@'];
+        let index = (brightness.sqrt() * (chars.len() - 1) as f32).min((chars.len() - 1) as f32) as usize;
         print!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, chars[index]);
     }
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let full_color;
-    if args.contains(&"--full-color".to_string()) {
-        println!("outputting with █ characters");
-        full_color = true;
-    } else {
-        full_color = false;
-        println!("outputting with ASCII characters");
-    }
+async fn run(full_color: bool) {
+    let width: u32 = 200;
+    let height: u32 = 100;
 
-    // Set the dimensions of the image
-    let width = 200;
-    let height = 100;
-
-    let aspect_ratio = width as f64 / height as f64;
-
-    // Create a world
-    let mut world = HittableList::new();
-
-    world.add(Box::new(Sphere::new(Vec3::new(-1001.0, 0.0, -3.0), 1000.0, Vec3::new(0.75, 0.25, 0.25), 0.0)));  
-    world.add(Box::new(Sphere::new(Vec3::new(1001.0, 0.0, -3.0), 1000.0, Vec3::new(0.25, 0.75, 0.25), 0.0)));
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, 0.0, -1004.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), 0.0)));
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, -1001.0, -3.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), 0.0)));
-    world.add(Box::new(Sphere::new(Vec3::new(0.0, 1001.0, -3.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), 0.0)));
-    world.add(Box::new(Sphere::new(Vec3::new(-0.5, -0.4, -2.5), 0.6, Vec3::new(0.9, 0.9, 0.9), 0.8)));  
-    world.add(Box::new(Sphere::new(Vec3::new(0.5, -0.7, -3.2), 0.3, Vec3::new(0.6, 0.8, 0.9), 0.2)));
-    
-    let lights = vec![
-        Light::new(Vec3::new(0.0, 0.8, -3.0), 0.3, Vec3::new(2.0, 2.0, 2.0)),
+    let spheres = vec![
+        // Floor, Walls, Ceiling
+        Sphere::new(Vec3::new(0.0, -1001.0, -3.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), Vec3::new(0.0, 0.0, 0.0), 0.0),
+        Sphere::new(Vec3::new(0.0, 1001.0, -3.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), Vec3::new(0.0, 0.0, 0.0), 0.0),
+        Sphere::new(Vec3::new(-1001.0, 0.0, -3.0), 1000.0, Vec3::new(0.75, 0.25, 0.25), Vec3::new(0.0, 0.0, 0.0), 0.0),
+        Sphere::new(Vec3::new(1001.0, 0.0, -3.0), 1000.0, Vec3::new(0.25, 0.75, 0.25), Vec3::new(0.0, 0.0, 0.0), 0.0),
+        Sphere::new(Vec3::new(0.0, 0.0, -1004.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), Vec3::new(0.0, 0.0, 0.0), 0.0),
+        // Central Spheres
+        Sphere::new(Vec3::new(-0.5, -0.4, -2.5), 0.6, Vec3::new(0.9, 0.9, 0.9), Vec3::new(0.0, 0.0, 0.0), 0.8),
+        Sphere::new(Vec3::new(0.5, -0.7, -3.2), 0.3, Vec3::new(0.6, 0.8, 0.9), Vec3::new(0.0, 0.0, 0.0), 0.2),
+        // Light Source
+        Sphere::new(Vec3::new(0.0, 0.8, -3.0), 0.3, Vec3::new(1.0, 1.0, 1.0), Vec3::new(5.0, 5.0, 5.0), 0.0),
     ];
 
-    for light in &lights {
-        world.add(Box::new(Sphere::new_emissive(
-            light.center,
-            light.radius,
-            Vec3::new(2.0, 2.0, 2.0),
-            light.emission, 0.0)));
+    let instance = wgpu::Instance::default();
+    let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.expect("Failed to find an appropriate adapter");
+    let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.expect("Failed to create device");
+
+    let uniforms = Uniforms {
+        width, height,
+        samples_per_pixel: SAMPLES_PER_PIXEL,
+        max_depth: MAX_DEPTH,
+        seed: rand::random(),
+        aspect_ratio: width as f32 / height as f32,
+        char_aspect_ratio: 0.55,
+        fov_rad: 45.0f32.to_radians(),
+        frame_number: 0,
+        _padding1: 0,
+        _padding2: 0,
+        _padding3: 0.0,
+    };
+    
+    let output_buffer_size = (width * height * std::mem::size_of::<Vec3>() as u32) as wgpu::BufferAddress;
+    let accumulation_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Accumulation Buffer"),
+        size: output_buffer_size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Uniform Buffer"),
+        contents: bytemuck::bytes_of(&uniforms),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    let sphere_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Sphere Buffer"),
+        contents: bytemuck::cast_slice(&spheres),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+
+    let output_buffer_size = (width * height * std::mem::size_of::<Vec3>() as u32) as wgpu::BufferAddress;
+    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Output Buffer"), 
+        size: output_buffer_size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, mapped_at_creation: false,
+    });
+    
+    let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Staging Buffer"), size: output_buffer_size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
+    });
+
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: None, source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+    });
+
+    // FIX: Create the layout and pipeline correctly
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Bind Group Layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+        ],
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Pipeline Layout"),
+        bind_group_layouts: &[&bind_group_layout],
+        push_constant_ranges: &[],
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Compute Pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+
+    println!("Starting temporal accumulation render...");
+    let start = Instant::now();
+    
+    // Render loop for temporal accumulation
+    for frame in 0..FRAMES_TO_ACCUMULATE {
+        // Update uniforms for this frame
+        let frame_uniforms = Uniforms {
+            width, height,
+            samples_per_pixel: SAMPLES_PER_PIXEL,
+            max_depth: MAX_DEPTH,
+            seed: rand::random::<u32>().wrapping_add(frame),
+            aspect_ratio: width as f32 / height as f32,
+            char_aspect_ratio: 0.55,
+            fov_rad: 45.0f32.to_radians(),
+            frame_number: frame,
+            _padding1: 0,
+            _padding2: 0,
+            _padding3: 0.0,
+        };
+        
+        // Update uniform buffer
+        queue.write_buffer(&uniform_buffer, 0, bytemuck::bytes_of(&frame_uniforms));
+        
+        // Create bind group for this frame
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Bind Group"), 
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: sphere_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: output_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: accumulation_buffer.as_entire_binding() },
+            ],
+        });
+
+        // Render this frame
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            cpass.set_pipeline(&pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.dispatch_workgroups((width + 15) / 16, (height + 15) / 16, 1);
+        }
+        queue.submit(Some(encoder.finish()));
+        
+        // Optional: show progress
+        if frame % 16 == 0 || frame == FRAMES_TO_ACCUMULATE - 1 {
+            println!("Frame {}/{}", frame + 1, FRAMES_TO_ACCUMULATE);
+        }
     }
 
-    let start = Instant::now();
-    println!("Starting render...");
+    // Copy final result to staging buffer
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_buffer_size);
+    queue.submit(Some(encoder.finish()));
 
-    let pixels: Vec<(u32, u32)> = (0..height)
-        .flat_map(|j| (0..width).map(move |i| (j, i)))
-        .collect();
+    let buffer_slice = staging_buffer.slice(..);
+    let mapping_complete = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mapping_complete_clone = mapping_complete.clone();
+    
+    buffer_slice.map_async(wgpu::MapMode::Read, move |_result| {
+        mapping_complete_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    
+    // Poll the device until mapping is complete
+    while !mapping_complete.load(std::sync::atomic::Ordering::Relaxed) {
+        let _ = device.poll(wgpu::MaintainBase::Poll);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
 
-    let colors: Vec<Vec3> = pixels
-        .par_iter()
-        .map(|(j, i)| {
-            let mut rng = rand::thread_rng();
-            let mut pixel_color = Vec3::new(0.0, 0.0, 0.0);
+    let data = buffer_slice.get_mapped_range();
+    let colors: &[Vec3] = bytemuck::cast_slice(&data);
 
-            // Start the multi-sampling loop for anti-aliasing
-            for _ in 0..SAMPLES_PER_PIXEL {
-                // Get a random point within the pixel
-                let u = (*i as f64 + rng.r#gen::<f64>()) / (width - 1) as f64;
-                let v = ((height - 1 - *j) as f64 + rng.r#gen::<f64>()) / (height - 1) as f64;
-
-                let fov = 45.0_f64.to_radians();
-                let half_height = (fov / 2.0).tan();
-                let half_width = aspect_ratio * half_height;
-
-                let viewport_x = half_width * (2.0 * u - 1.0);
-                let viewport_y = half_height * (2.0 * v - 1.0);
-
-                let char_aspect_ratio = 0.55;
-                let corrected_viewport_y = viewport_y / char_aspect_ratio;
-
-                let direction = Vec3::new(viewport_x, corrected_viewport_y, -1.0).normalize();
-                let ray = Ray {
-                    origin: Vec3::new(0.0, 0.0, 0.0),
-                    direction,
-                };
-                
-                // Accumulate the color from each sample
-                pixel_color = pixel_color + ray_color(&ray, &world, MAX_DEPTH, &lights);
-            }
-            
-            // Return the average color
-            pixel_color / SAMPLES_PER_PIXEL as f64
-        })
-        .collect();
-
-    // For every pixel
     for j in 0..height {
         for i in 0..width {
             let index = (j * width + i) as usize;
@@ -215,10 +219,22 @@ fn main() {
         }
         println!();
     }
+    drop(data);
+    staging_buffer.unmap();
 
     let duration = start.elapsed();
-    println!("Render completed in: {:?}", duration);
+    println!("Temporal accumulation completed in: {:?}", duration);
+    println!("Total effective samples: {}", SAMPLES_PER_PIXEL * FRAMES_TO_ACCUMULATE);
     println!("Image dimensions: {}x{}", width, height);
-    println!("Total pixels: {}", width * height);
-    println!("Average time per pixel: {:?}", duration / (width * height) as u32);
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let full_color = args.contains(&"--full-color".to_string());
+    
+    if full_color { println!("outputting with █ characters"); } 
+    else { println!("outputting with ASCII characters"); }
+
+    // Use pollster to run the async run function to completion.
+    pollster::block_on(run(full_color));
 }

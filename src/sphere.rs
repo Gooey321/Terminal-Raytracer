@@ -1,77 +1,30 @@
 // src/sphere.rs
 use crate::vec3::Vec3;
-use crate::ray::Ray;
-use crate::hittable::{HitRecord, Hittable};
+use bytemuck::{Pod, Zeroable};
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct Sphere {
     pub center: Vec3,
-    pub radius: f64,
+    pub radius: f32,
     pub color: Vec3, // Colour of the sphere.
     pub emission: Vec3,
-    pub reflectivity: f64,
+    pub reflectivity: f32,
+
+    _p1: f32,
+    _p2: f32,
 }
 
 impl Sphere {
-    pub fn new(center: Vec3, radius: f64, color: Vec3, reflectivity: f64) -> Self {
+    pub fn new(center: Vec3, radius: f64, color: Vec3, emission: Vec3, reflectivity: f64) -> Self {
         Self {
             center,
-            radius: radius.max(0.0),
-            color,
-            emission: Vec3::new(0.0, 0.0, 0.0),
-            reflectivity,
-        }
-    }
-
-    pub fn new_emissive(center: Vec3, radius: f64, color: Vec3, emission: Vec3, reflectivity: f64) -> Self {
-        Self {
-            center,
-            radius,
+            radius: (radius.max(0.0)) as f32,
             color,
             emission,
-            reflectivity,
+            reflectivity: reflectivity as f32,
+            _p1: 0.0,
+            _p2: 0.0,
         }
-    }
-}
-
-impl Hittable for Sphere {
-    fn hit(&self, ray: &Ray, t_min: f64, t_max: f64) -> Option<HitRecord> {
-        let oc = self.center - ray.origin;
-        let a = ray.direction.length_squared();
-        let h = ray.direction.dot(&oc);
-        let c = oc.length_squared() - self.radius * self.radius;
-        
-        let discriminant = h * h - a * c;
-        if discriminant < 0.0 {
-            return None;
-        }
-
-        let sqrtd = discriminant.sqrt();
-
-        // Find the nearest root that lies in the acceptable range
-        let mut root = (h - sqrtd) / a;
-        if root <= t_min || t_max <= root {
-            root = (h + sqrtd) / a;
-            if root <= t_min || t_max <= root {
-                return None;
-            }
-        }
-
-        let t = root;
-        let p = ray.origin + ray.direction * t;
-        let outward_normal = (p - self.center) / self.radius;
-        
-        let mut hit_record = HitRecord {
-            p,
-            normal: outward_normal,
-            t,
-            front_face: false,
-            color: self.color,
-            emission: self.emission,
-            reflectivity: self.reflectivity,
-        };
-
-        hit_record.set_face_normal(ray, outward_normal);
-
-        Some(hit_record)
     }
 }
