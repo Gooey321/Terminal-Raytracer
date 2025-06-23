@@ -14,11 +14,23 @@ use hittable_list::HittableList;
 use rand::Rng;
 use rayon::prelude::*;
 
-const MAX_DEPTH: i32 = 10; // Maximum recursion depth for reflections
-const SAMPLES_PER_PIXEL: i32 = 128; // Use a moderate number of samples for a good balance
+const MAX_DEPTH: i32 = 8; // Maximum recursion depth for reflections
+const SAMPLES_PER_PIXEL: i32 = 256; // Use a moderate number of samples for a good balance
 
-fn ray_color(ray: &Ray, world: &HittableList, depth: i32) -> Vec3 {
+#[derive(Clone, Copy)]
+struct Light {
+    center: Vec3,
+    radius: f64,
+    emission: Vec3,
+}
 
+impl Light {
+    fn new(center: Vec3, radius: f64, emission: Vec3) -> Self {
+        Light { center, radius, emission }
+    }
+}
+
+fn ray_color(ray: &Ray, world: &HittableList, depth: i32, lights: &[Light]) -> Vec3 {
     // If we've exceeded the ray bounce limit, no more light is gathered.
     if depth <= 0 {
         return Vec3::new(0.0, 0.0, 0.0);
@@ -26,61 +38,64 @@ fn ray_color(ray: &Ray, world: &HittableList, depth: i32) -> Vec3 {
 
     if let Some(hit_record) = world.hit(ray, 0.001, f64::INFINITY) {
         let emission = hit_record.emission;
-        let shadow_samples = 4;
-        let mut visibility = 0.0;
+        let mut total_direct_light = Vec3::new(0.0, 0.0, 0.0);
+        let mut rng = rand::thread_rng(); // Move RNG creation here
 
-        // light values, hardcoded for now
-        let light_center = Vec3::new(0.0, 0.8, -3.0);
-        let light_radius = 0.3;
-        let light_emission = Vec3::new(1.0, 1.0, 1.0);
+        // Calculate lighting from ALL lights in the list
+        for light in lights {
+            let shadow_samples = 64; // Increased for cleaner shadows
+            let mut visibility = 0.0;
 
-        let mut rng = rand::thread_rng();
+            // Calculate direct lighting for this specific light
+            for _ in 0..shadow_samples {
+                let u1 = rng.r#gen::<f64>();
+                let u2 = rng.r#gen::<f64>();
 
-        // Calculate direct lighting
-        for _ in 0..shadow_samples {
-            // generate a random point on the light source
-            let rand_vec = loop {
-                let p = Vec3::new(
-                    rng.gen_range(-1.0..1.0),
-                    rng.gen_range(-1.0..1.0),
-                    rng.gen_range(-1.0..1.0),
-                );
-                if p.length_squared() < 1.0 {
-                    break p;
+                let z = 1.0 - 2.0 * u1;
+                let r = (1.0 - z * z).sqrt();
+                let phi = 2.0 * std::f64::consts::PI * u2;
+
+
+                // Generate a random point on this light's surface
+                let rand_vec = Vec3::new(r * phi.cos(), r * phi.sin(), z);
+                let rand_light_point = light.center + rand_vec * light.radius;
+
+                // Cast a shadow ray towards that random point
+                let shadow_ray_orig = hit_record.p + hit_record.normal * 1e-4;
+                let light_dir = rand_light_point - shadow_ray_orig;
+                let distance_light = light_dir.length();
+
+                let shadow_ray = Ray {
+                    origin: shadow_ray_orig,
+                    direction: light_dir.normalize(),
+                };
+
+                // Check if the path is obstructed
+                if world.hit(&shadow_ray, 0.001, distance_light - 0.001).is_none() {
+                    visibility += 1.0;
                 }
-            };
-            let rand_light_point = light_center + rand_vec.normalize() * light_radius;
-
-            // Cast a shadow ray towards that random point
-            let shadow_ray_orig = hit_record.p + hit_record.normal * 1e-4;
-            let light_dir = rand_light_point - shadow_ray_orig;
-            let distance_light = light_dir.length();
-
-            let shadow_ray = Ray {
-                origin: shadow_ray_orig,
-                direction: light_dir.normalize(),
-            };
-
-            // Check if the path is obstructed
-            if world.hit(&shadow_ray, 0.001, distance_light - 0.001).is_none() {
-                visibility += 1.0;
             }
+
+            let average_visibility = visibility / shadow_samples as f64;
+            // Add this light's contribution to the total
+            total_direct_light = total_direct_light + light.emission * average_visibility;
         }
 
-        let average_visibility = visibility / shadow_samples as f64;
-        let direct_light = light_emission * average_visibility;
+        let ambient_light = Vec3::new(1.0, 1.0, 1.0) * 0.1; // Reduced for better contrast
+        let surface_color = hit_record.color * (total_direct_light + ambient_light);
 
-        let ambient_light = Vec3::new(1.0, 1.0, 1.0) * 0.2;
-        let surface_color = hit_record.color * (direct_light + ambient_light);
-
-        // Reflection
-        let reflected_ray = Ray {
-            origin: hit_record.p + hit_record.normal * 1e-4,
-            direction: ray.direction.reflect(&hit_record.normal),
+        // Only calculate reflections if reflectivity is significant
+        let reflected_color = if hit_record.reflectivity > 0.01 {
+            let reflected_ray = Ray {
+                origin: hit_record.p + hit_record.normal * 1e-4,
+                direction: ray.direction.reflect(&hit_record.normal),
+            };
+            ray_color(&reflected_ray, world, depth - 1, lights) * hit_record.reflectivity
+        } else {
+            Vec3::new(0.0, 0.0, 0.0)
         };
-        let reflected_color = ray_color(&reflected_ray, world, depth - 1);
 
-        let final_color = surface_color * (1.0 - hit_record.reflectivity) + reflected_color * hit_record.reflectivity;
+        let final_color = surface_color * (1.0 - hit_record.reflectivity) + reflected_color;
 
         return emission + final_color;
     }
@@ -136,14 +151,17 @@ fn main() {
     world.add(Box::new(Sphere::new(Vec3::new(-0.5, -0.4, -2.5), 0.6, Vec3::new(0.9, 0.9, 0.9), 0.8)));  
     world.add(Box::new(Sphere::new(Vec3::new(0.5, -0.7, -3.2), 0.3, Vec3::new(0.6, 0.8, 0.9), 0.2)));
     
-    // Add a ceiling light
-    world.add(Box::new(Sphere::new_emissive(
-        Vec3::new(0.0, 0.8, -3.0),
-        0.3,
-        Vec3::new(1.0, 1.0, 1.0),
-        Vec3::new(1.0, 1.0, 1.0),
-        0.0
-    )));
+    let lights = vec![
+        Light::new(Vec3::new(0.0, 0.8, -3.0), 0.3, Vec3::new(2.0, 2.0, 2.0)),
+    ];
+
+    for light in &lights {
+        world.add(Box::new(Sphere::new_emissive(
+            light.center,
+            light.radius,
+            Vec3::new(2.0, 2.0, 2.0),
+            light.emission, 0.0)));
+    }
 
     let start = Instant::now();
     println!("Starting render...");
@@ -181,7 +199,7 @@ fn main() {
                 };
                 
                 // Accumulate the color from each sample
-                pixel_color = pixel_color + ray_color(&ray, &world, MAX_DEPTH);
+                pixel_color = pixel_color + ray_color(&ray, &world, MAX_DEPTH, &lights);
             }
             
             // Return the average color
