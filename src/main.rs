@@ -7,9 +7,9 @@ use sphere::Sphere;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-const MAX_DEPTH: u32 = 4;
-const SAMPLES_PER_PIXEL: u32 = 256;
-const FRAMES_TO_ACCUMULATE: u32 = 128;
+const MAX_DEPTH: u32 = 2;
+const SAMPLES_PER_PIXEL: u32 = 64;
+const FRAMES_TO_ACCUMULATE: u32 = 16;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -29,11 +29,16 @@ struct Uniforms {
 }
 
 fn write_color(pixel_color: Vec3, full_color: bool) {
-    let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-    let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-    let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+    // reinhard tone mapping
+    let mapped_x = pixel_color.x / (pixel_color.x + 1.0);
+    let mapped_y = pixel_color.y / (pixel_color.y + 1.0);
+    let mapped_z = pixel_color.z / (pixel_color.z + 1.0);
 
-    let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
+    let r = (mapped_x.powf(1.0/2.0) * 255.0).clamp(0.0, 255.0) as u8;
+    let g = (mapped_y.powf(1.0/2.0) * 255.0).clamp(0.0, 255.0) as u8;
+    let b = (mapped_z.powf(1.0/2.0) * 255.0).clamp(0.0, 255.0) as u8;
+
+    let brightness = 0.2126 * mapped_x + 0.7152 * mapped_y + 0.0722 * mapped_z;
 
     if full_color {
         print!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b);
@@ -50,16 +55,16 @@ async fn run(full_color: bool) {
 
     let spheres = vec![
         // Floor, Walls, Ceiling
-        Sphere::new(Vec3::new(0.0, -1001.0, -3.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), Vec3::new(0.0, 0.0, 0.0), 0.0),
-        Sphere::new(Vec3::new(0.0, 1001.0, -3.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), Vec3::new(0.0, 0.0, 0.0), 0.0),
-        Sphere::new(Vec3::new(-1001.0, 0.0, -3.0), 1000.0, Vec3::new(0.75, 0.25, 0.25), Vec3::new(0.0, 0.0, 0.0), 0.0),
-        Sphere::new(Vec3::new(1001.0, 0.0, -3.0), 1000.0, Vec3::new(0.25, 0.75, 0.25), Vec3::new(0.0, 0.0, 0.0), 0.0),
-        Sphere::new(Vec3::new(0.0, 0.0, -1004.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), Vec3::new(0.0, 0.0, 0.0), 0.0),
+        Sphere::new(Vec3::new(0.0, -1001.0, -3.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), Vec3::new(0.0, 0.0, 0.0), 0.0, 0.0),
+        Sphere::new(Vec3::new(0.0, 1001.0, -3.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), Vec3::new(0.0, 0.0, 0.0), 0.0, 0.0),
+        Sphere::new(Vec3::new(-1001.0, 0.0, -3.0), 1000.0, Vec3::new(0.75, 0.25, 0.25), Vec3::new(0.0, 0.0, 0.0), 0.0, 0.0),
+        Sphere::new(Vec3::new(1001.0, 0.0, -3.0), 1000.0, Vec3::new(0.25, 0.75, 0.25), Vec3::new(0.0, 0.0, 0.0), 0.0, 0.0),
+        Sphere::new(Vec3::new(0.0, 0.0, -1004.0), 1000.0, Vec3::new(0.75, 0.75, 0.75), Vec3::new(0.0, 0.0, 0.0), 0.0, 0.0),
         // Central Spheres
-        Sphere::new(Vec3::new(-0.5, -0.4, -2.5), 0.6, Vec3::new(0.9, 0.9, 0.9), Vec3::new(0.0, 0.0, 0.0), 0.8),
-        Sphere::new(Vec3::new(0.5, -0.7, -3.2), 0.3, Vec3::new(0.6, 0.8, 0.9), Vec3::new(0.0, 0.0, 0.0), 0.2),
+        Sphere::new(Vec3::new(-0.5, -0.4, -2.5), 0.6, Vec3::new(0.9, 0.9, 0.9), Vec3::new(0.0, 0.0, 0.0), 0.8, 0.1),
+        Sphere::new(Vec3::new(0.5, -0.7, -3.2), 0.3, Vec3::new(0.6, 0.8, 0.9), Vec3::new(0.0, 0.0, 0.0), 0.2, 0.0),
         // Light Source
-        Sphere::new(Vec3::new(0.0, 0.8, -3.0), 0.3, Vec3::new(1.0, 1.0, 1.0), Vec3::new(5.0, 5.0, 5.0), 0.0),
+        Sphere::new(Vec3::new(0.0, 0.8, -3.0), 0.3, Vec3::new(1.0, 1.0, 1.0), Vec3::new(5.0, 5.0, 5.0), 0.0, 0.0),
     ];
 
     let instance = wgpu::Instance::default();
