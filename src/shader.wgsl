@@ -109,6 +109,16 @@ fn reflect(v: Vec3, n: Vec3) -> Vec3 {
     return vec3_sub(v, vec3_mul(n, 2.0 * dot(v, n))); 
 }
 
+fn sample_light_direction(hit_point: Vec3, light_center: Vec3, light_radius: f32) -> Vec3 {
+    // sample a point on the light center
+    let to_light = vec3_sub(light_center, hit_point);
+    let distance = length(to_light);
+    let light_dir = vec3_div(to_light, distance);
+
+    let random_offset = vec3_mul(random_in_unit_sphere(), light_radius);
+    return normalize(vec3_add(light_dir, random_offset));
+}
+
 // Ray tracing logic
 fn hit_scene(ray: Ray, t_min: f32, t_max: f32) -> HitRecord {
     var closest_so_far = t_max;
@@ -170,6 +180,29 @@ fn ray_color(initial_ray: Ray) -> Vec3 {
         }
 
         accumulated_color = vec3_add(accumulated_color, vec3_mul_vec3(hit.emission, attenuation));
+        
+        // Direct light sampling - sample each light source
+        for (var light_idx = 0u; light_idx < arrayLength(&spheres); light_idx = light_idx + 1) {
+            let light = spheres[light_idx];
+            
+            // Only sample lights (spheres with emission)
+            if (length(light.emission) > 0.0) {
+                let light_dir = sample_light_direction(hit.p, light.center, light.radius);
+                let shadow_ray = Ray(hit.p, light_dir);
+                let shadow_hit = hit_scene(shadow_ray, 0.001, 1e10);
+                
+                // Check if we hit the light (not shadowed)
+                if (shadow_hit.t > 0.0 && length(vec3_sub(shadow_hit.p, light.center)) <= light.radius + 0.001) {
+                    let cos_theta = max(0.0, dot(hit.normal, light_dir));
+                    let light_contribution = vec3_mul_vec3(
+                        vec3_mul_vec3(hit.color, light.emission),
+                        vec3_mul(attenuation, cos_theta)
+                    );
+                    accumulated_color = vec3_add(accumulated_color, light_contribution);
+                }
+            }
+        }
+
         attenuation = vec3_mul_vec3(attenuation, hit.color);
 
         let is_reflective = hit.reflectivity > random_f32();
