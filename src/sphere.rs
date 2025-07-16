@@ -7,7 +7,7 @@ use bytemuck::{Pod, Zeroable};
 pub struct Sphere {
     pub center: Vec3,
     pub radius: f32,
-    pub color: Vec3, // Colour of the sphere.
+    pub color: Vec3,
     pub emission: Vec3,
     pub reflectivity: f32,
 
@@ -15,6 +15,7 @@ pub struct Sphere {
     _p2: f32,
 }
 
+// Add a function to create a new Sphere
 impl Sphere {
     pub fn new(center: Vec3, radius: f64, color: Vec3, emission: Vec3, reflectivity: f64) -> Self {
         Self {

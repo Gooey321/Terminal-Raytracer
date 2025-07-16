@@ -1,0 +1,69 @@
+{
+  "width": 200,
+  "height": 100,
+  "samples_per_pixel": 256,
+  "max_depth": 4,
+  "frames_to_accumulate": 256,
+  "camera": {
+    "fov_degrees": 45.0,
+    "char_aspect_ratio": 0.55
+  },
+  "spheres": [
+    {
+      "center": [0.0, -1001.0, -3.0],
+      "radius": 1000.0,
+      "color": [0.75, 0.75, 0.75],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.0
+    },
+    {
+      "center": [0.0, 1001.0, -3.0],
+      "radius": 1000.0,
+      "color": [0.75, 0.75, 0.75],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.0
+    },
+    {
+      "center": [-1001.0, 0.0, -3.0],
+      "radius": 1000.0,
+      "color": [0.75, 0.25, 0.25],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.0
+    },
+    {
+      "center": [1001.0, 0.0, -3.0],
+      "radius": 1000.0,
+      "color": [0.25, 0.75, 0.25],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.0
+    },
+    {
+      "center": [0.0, 0.0, -1004.0],
+      "radius": 1000.0,
+      "color": [0.75, 0.75, 0.75],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.0
+    },
+    {
+      "center": [-0.5, -0.4, -2.5],
+      "radius": 0.6,
+      "color": [0.9, 0.9, 0.9],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.8
+    },
+    {
+      "center": [0.5, -0.7, -3.2],
+      "radius": 0.3,
+      "color": [0.6, 0.8, 0.9],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.2
+    },
+    {
+      "center": [0.0, 0.8, -3.0],
+      "radius": 0.3,
+      "color": [1.0, 1.0, 1.0],
+      "emission": [5.0, 5.0, 5.0],
+      "reflectivity": 0.0
+    }
+  ]
+}
