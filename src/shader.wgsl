@@ -352,7 +352,7 @@ fn ray_color(initial_ray: Ray) -> Vec3 {
     return accumulated_color;
 }
 
-@compute @workgroup_size(16, 16, 1)
+@compute @workgroup_size(8, 8, 1)
 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let x = global_id.x;
@@ -406,7 +406,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let variance_value = variance_vec.x + variance_vec.y + variance_vec.z; // Sum of RGB variances
     
     // Adaptive sampling: add more samples if variance is high
-    if (variance_value > 0.01 && base_samples < max_samples) {
+    if (variance_value > 10.0 && base_samples < max_samples) {
         let additional_samples = min(max_samples - base_samples, u32(variance_value * 50.0));
         
         for (var i = 0u; i < additional_samples; i = i + 1) {

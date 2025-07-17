@@ -1,10 +1,10 @@
 mod vec3;
-mod primitive; // Add this
+mod primitive;
 
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use vec3::Vec3;
-use primitive::Primitive; // Add this
+use primitive::Primitive; // Add this import
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 use serde::{Serialize, Deserialize};
@@ -72,8 +72,9 @@ struct SceneConfig {
     frames_to_accumulate: u32,
     camera: CameraConfig,
     spheres: Vec<SphereConfig>,
-    planes: Option<Vec<PlaneConfig>>, // Add this
-    triangles: Option<Vec<TriangleConfig>>, // Add this
+    planes: Vec<PlaneConfig>,
+    #[serde(default)]
+    triangles: Vec<TriangleConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -121,18 +122,17 @@ async fn run(full_color: bool, verbose: bool) {
     let (terminal_width, terminal_height) = terminal::size().unwrap();
     
     // Adjust scene dimensions to fit terminal
-    let mut scene = load_scene("src/scenes/demo.json").expect("Failed to load scene");
-
+    let mut scene = load_scene("src/scenes/scene.json").expect("Failed to load scene");
+    
     // Ensure output fits in terminal
     scene.width = (terminal_width as u32).min(scene.width);
     scene.height = (terminal_height as u32 - 2).min(scene.height); // -2 for status lines
 
     // Initialize camera
     let mut camera = Camera::new(Vec3::new(0.0, 0.0, 0.0), -std::f32::consts::PI / 2.0, 0.0);
-    
-    // Create primitives from scene config
-    let mut primitives = Vec::new();
-    
+
+    let mut primitives: Vec<Primitive> = Vec::new();
+
     // Add spheres
     for s in &scene.spheres {
         primitives.push(Primitive::new_sphere(
@@ -143,32 +143,28 @@ async fn run(full_color: bool, verbose: bool) {
             s.reflectivity,
         ));
     }
-    
-    // Add planes if they exist
-    if let Some(planes) = &scene.planes {
-        for p in planes {
-            primitives.push(Primitive::new_plane(
-                Vec3::new(p.point[0], p.point[1], p.point[2]),
-                Vec3::new(p.normal[0], p.normal[1], p.normal[2]),
-                Vec3::new(p.color[0], p.color[1], p.color[2]),
-                Vec3::new(p.emission[0], p.emission[1], p.emission[2]),
-                p.reflectivity,
-            ));
-        }
+
+    // Add planes
+    for p in &scene.planes {
+        primitives.push(Primitive::new_plane(
+            Vec3::new(p.point[0], p.point[1], p.point[2]),
+            Vec3::new(p.normal[0], p.normal[1], p.normal[2]),
+            Vec3::new(p.color[0], p.color[1], p.color[2]),
+            Vec3::new(p.emission[0], p.emission[1], p.emission[2]),
+            p.reflectivity,
+        ));
     }
-    
-    // Add triangles if they exist
-    if let Some(triangles) = &scene.triangles {
-        for t in triangles {
-            primitives.push(Primitive::new_triangle(
-                Vec3::new(t.v0[0], t.v0[1], t.v0[2]),
-                Vec3::new(t.v1[0], t.v1[1], t.v1[2]),
-                Vec3::new(t.v2[0], t.v2[1], t.v2[2]),
-                Vec3::new(t.color[0], t.color[1], t.color[2]),
-                Vec3::new(t.emission[0], t.emission[1], t.emission[2]),
-                t.reflectivity,
-            ));
-        }
+
+    // Add triangles
+    for t in &scene.triangles {
+        primitives.push(Primitive::new_triangle(
+            Vec3::new(t.v0[0], t.v0[1], t.v0[2]),
+            Vec3::new(t.v1[0], t.v1[1], t.v1[2]),
+            Vec3::new(t.v2[0], t.v2[1], t.v2[2]),
+            Vec3::new(t.color[0], t.color[1], t.color[2]),
+            Vec3::new(t.emission[0], t.emission[1], t.emission[2]),
+            t.reflectivity,
+        ));
     }
 
     let instance = wgpu::Instance::default();
@@ -189,11 +185,12 @@ async fn run(full_color: bool, verbose: bool) {
         mapped_at_creation: false,
     });
 
-    // Add this after creating the accumulation buffer:
+    // Add variance buffer for the shader
+    let variance_buffer_size = (scene.width * scene.height * 8) as wgpu::BufferAddress; // 8 bytes per VarianceBuffer (f32 + u32)
     let variance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Variance Buffer"),
-        size: (scene.width * scene.height) as u64 * std::mem::size_of::<[f32; 2]>() as u64, // f32 + u32 = 2 * f32
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        size: variance_buffer_size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
 
@@ -235,57 +232,11 @@ async fn run(full_color: bool, verbose: bool) {
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Bind Group Layout"),
         entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // Add this new entry for binding 4:
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
+            wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
         ],
     });
     
@@ -320,6 +271,19 @@ async fn run(full_color: bool, verbose: bool) {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap();
     
+    // Create bind group once outside the loop
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Bind Group"), 
+        layout: &bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: primitive_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: output_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: accumulation_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 4, resource: variance_buffer.as_entire_binding() },
+        ],
+    });
+
     // Main loop
     loop {
         // Handle input
@@ -374,112 +338,102 @@ async fn run(full_color: bool, verbose: bool) {
             // Update uniform buffer
             queue.write_buffer(&uniform_buffer, 0, bytemuck::bytes_of(&frame_uniforms));
             
-            // Create bind group for this frame
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Bind Group"), 
-                layout: &bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: primitive_buffer.as_entire_binding() }, // Changed this line
-                    wgpu::BindGroupEntry { binding: 2, resource: output_buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: accumulation_buffer.as_entire_binding() },
-                    // Add this new entry for binding 4:
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: variance_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-
-            // Render this frame
+            // Render this frame (bind group is already created)
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                 cpass.set_pipeline(&pipeline);
                 cpass.set_bind_group(0, &bind_group, &[]);
                 cpass.dispatch_workgroups(
-                    (scene.width + 15) / 16,
-                    (scene.height + 15) / 16, 
+                    (scene.width + 7) / 8,
+                    (scene.height + 7) / 8, 
                     1);
             }
             queue.submit(Some(encoder.finish()));
             
-            // Copy final result to staging buffer and render
-            let mut display_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-            display_encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_buffer_size);
-            queue.submit(Some(display_encoder.finish()));
-            
-            let buffer_slice = staging_buffer.slice(..);
-            buffer_slice.map_async(wgpu::MapMode::Read, |result| {
-                result.unwrap();
-            });
-            let _ = device.poll(wgpu::MaintainBase::Wait);
-            
-            let data = buffer_slice.get_mapped_range();
-            let colors: &[Vec3] = bytemuck::cast_slice(&data);
-
-            // Calculate frame rate
-            let current_time = Instant::now();
-            let frame_duration = current_time.duration_since(last_frame_time);
-            last_frame_time = current_time;
-            
-            // Store frame time and maintain rolling average
-            frame_times.push_back(frame_duration);
-            if frame_times.len() > max_frame_samples {
-                frame_times.pop_front();
-            }
-            
-            // Calculate average FPS
-            let avg_frame_time: Duration = frame_times.iter().sum::<Duration>() / frame_times.len() as u32;
-            let fps = 1.0 / avg_frame_time.as_secs_f64();
-            
-            // Calculate render time percentage (time spent actually rendering vs total frame time)
-            let render_time_ms = frame_duration.as_millis();
-
-            // Move cursor to top-left WITHOUT clearing screen
-            print!("\x1B[1;1H"); // Just move cursor, don't clear
-            
-            // Build the entire frame in memory first
-            let mut frame_buffer = String::with_capacity((scene.width * scene.height * 20) as usize);
-            
-            for j in 0..scene.height {
-                for i in 0..scene.width {
-                    let index = (j * scene.width + i) as usize;
-                    let pixel_color = colors[index];
-                    
-                    let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-                    let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-                    let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-                    
-                    if full_color {
-                        frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b));
-                    } else {
-                        let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
-                        let chars = [' ', '.', ':', '-', '=', '+', '*', 'a', '#', '%', '@'];
-                        let index = (brightness.sqrt() * (chars.len() - 1) as f32).min((chars.len() - 1) as f32) as usize;
-                        frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, chars[index]));
-                    }
-                }
-                frame_buffer.push_str("\r\n");
-            }
-            
-            // Enhanced status line with FPS
-            frame_buffer.push_str(&format!(
-                "Frame: {}/{} | FPS: {:.1} | Render: {}ms | WASD: move, arrows: look, ESC: exit\x1B[K\r\n", 
-                frame_count + 1, 
-                scene.frames_to_accumulate,
-                fps,
-                render_time_ms
-            ));
-            
-            // Output entire frame at once
-            print!("{}", frame_buffer);
-            io::stdout().flush().unwrap();
-            
-            drop(data);
-            staging_buffer.unmap();
-            
             frame_count += 1;
+
+            // Only display every 3rd frame or when accumulation is complete
+            if frame_count % 3 == 0 || frame_count >= scene.frames_to_accumulate {
+                // Copy final result to staging buffer and render
+                let mut display_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+                display_encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_buffer_size);
+                queue.submit(Some(display_encoder.finish()));
+                
+                let buffer_slice = staging_buffer.slice(..);
+                buffer_slice.map_async(wgpu::MapMode::Read, |result| {
+                    result.unwrap();
+                });
+                let _ = device.poll(wgpu::MaintainBase::Wait);
+                
+                let data = buffer_slice.get_mapped_range();
+                let colors: &[Vec3] = bytemuck::cast_slice(&data);
+
+                // Calculate frame rate
+                let current_time = Instant::now();
+                let frame_duration = current_time.duration_since(last_frame_time);
+                last_frame_time = current_time;
+                
+                // Store frame time and maintain rolling average
+                frame_times.push_back(frame_duration);
+                if frame_times.len() > max_frame_samples {
+                    frame_times.pop_front();
+                }
+                
+                // Calculate average FPS
+                let avg_frame_time: Duration = frame_times.iter().sum::<Duration>() / frame_times.len() as u32;
+                let fps = 1.0 / avg_frame_time.as_secs_f64();
+                
+                // Calculate render time percentage (time spent actually rendering vs total frame time)
+                let render_time_ms = frame_duration.as_millis();
+
+                // Move cursor to top-left WITHOUT clearing screen
+                print!("\x1B[1;1H"); // Just move cursor, don't clear
+                
+                // Build the entire frame in memory first
+                let mut frame_buffer = String::with_capacity((scene.width * scene.height * 20) as usize);
+                
+                for j in 0..scene.height {
+                    for i in 0..scene.width {
+                        let index = (j * scene.width + i) as usize;
+                        let pixel_color = colors[index];
+                        
+                        let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                        let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                        let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                        
+                        if full_color {
+                            frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b));
+                        } else {
+                            let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
+                            let chars = [' ', '.', ':', '-', '=', '+', '*', 'a', '#', '%', '@'];
+                            let index = (brightness.sqrt() * (chars.len() - 1) as f32).min((chars.len() - 1) as f32) as usize;
+                            frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, chars[index]));
+                        }
+                    }
+                    frame_buffer.push_str("\r\n");
+                }
+                
+                // Enhanced status line with FPS
+                frame_buffer.push_str(&format!(
+                    "Frame: {}/{} | FPS: {:.1} | Render: {}ms | WASD: move, arrows: look, ESC: exit\x1B[K\r\n", 
+                    frame_count, 
+                    scene.frames_to_accumulate,
+                    fps,
+                    render_time_ms
+                ));
+                
+                // Output entire frame at once
+                print!("{}", frame_buffer);
+                io::stdout().flush().unwrap();
+                
+                drop(data);
+                staging_buffer.unmap();
+            } else {
+                // For frames we don't display, just wait a bit to avoid spinning
+                std::thread::sleep(Duration::from_millis(1));
+            }
+
             camera_moved = false;
         } else {
             // If accumulation is finished, just wait for input
