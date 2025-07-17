@@ -180,10 +180,7 @@ fn get_sky_color(direction: Vec3) -> Vec3 {
 
 // Add environment lighting function
 fn get_environment_light(direction: Vec3) -> Vec3 {
-    // Simple hemisphere lighting
-    let up_contribution = max(0.0, direction.y) * 0.3;
-    let ambient = Vec3(0.1, 0.15, 0.3, 0.0); // Blue ambient
-    return vec3_add(ambient, vec3_mul(Vec3(0.2, 0.3, 0.6, 0.0), up_contribution));
+    return Vec3(0.0, 0.0, 0.0, 0.0);
 }
 
 fn ray_color(initial_ray: Ray) -> Vec3 {

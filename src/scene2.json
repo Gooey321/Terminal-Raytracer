@@ -1,8 +1,8 @@
 {
   "width": 200,
   "height": 100,
-  "samples_per_pixel": 64,
-  "max_depth": 8,
+  "samples_per_pixel": 32,
+  "max_depth": 4,
   "frames_to_accumulate": 100000000,
   "camera": {
     "fov_degrees": 45.0,
@@ -71,6 +71,13 @@
       "color": [0.8, 0.9, 1.0],
       "emission": [0.8, 0.9, 1.5],
       "reflectivity": 0.0
+    },
+    {
+      "center": [3.0, 1.2, 4.0],
+      "radius": 0.5,
+      "color": [1.0, 1.0, 1.0],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 1.0
     }
   ]
 }
