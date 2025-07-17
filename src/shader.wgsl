@@ -5,19 +5,31 @@ struct Vec3 {
     _padding: f32,
 };
 
-struct Sphere {
-    center: Vec3,
-    radius: f32,
-    _padding1: f32,
-    _padding2: f32,
-    _padding3: f32,
+struct Primitive {
+    primitive_type: u32,
+    _padding1: u32,
+    _padding2: u32,
+    _padding3: u32,
+    
     color: Vec3,
     emission: Vec3,
     reflectivity: f32,
     _padding4: f32,
     _padding5: f32,
     _padding6: f32,
-}
+    
+    sphere_center: Vec3,
+    sphere_radius: f32,
+    _sphere_padding: array<f32, 3>,
+    
+    plane_point: Vec3,
+    plane_normal: Vec3,
+    
+    triangle_v0: Vec3,
+    triangle_v1: Vec3,
+    triangle_v2: Vec3,
+    _triangle_padding: f32,
+};
 
 struct Ray {
     origin: Vec3,
@@ -53,10 +65,16 @@ struct Uniforms {
     camera_up: Vec3,
 };
 
+struct VarianceBuffer {
+    variance: f32,
+    sample_count: u32,
+};
+
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> spheres: array<Sphere>;
+@group(0) @binding(1) var<storage, read> primitives: array<Primitive>; // Changed from spheres
 @group(0) @binding(2) var<storage, read_write> pixels: array<Vec3>;
 @group(0) @binding(3) var<storage, read_write> accumulation: array<Vec3>;
+@group(0) @binding(4) var<storage, read_write> variance: array<VarianceBuffer>;
 
 // Vector operations
 fn vec3_add(a: Vec3, b: Vec3) -> Vec3 {
@@ -118,51 +136,141 @@ fn reflect(v: Vec3, n: Vec3) -> Vec3 {
     return vec3_sub(v, vec3_mul(n, 2.0 * dot(v, n))); 
 }
 
-fn sample_light_direction(hit_point: Vec3, light_center: Vec3, light_radius: f32) -> Vec3 {
-    // sample a point on the light center
-    let to_light = vec3_sub(light_center, hit_point);
-    let distance = length(to_light);
-    let light_dir = vec3_div(to_light, distance);
-
-    let random_offset = vec3_mul(random_in_unit_sphere(), light_radius);
-    return normalize(vec3_add(light_dir, random_offset));
+fn sample_light_direction(hit_point: Vec3, primitive: Primitive) -> Vec3 {
+    if (primitive.primitive_type == 0u) { // Sphere light
+        let to_light = vec3_sub(primitive.sphere_center, hit_point);
+        let distance = length(to_light);
+        let light_dir = vec3_div(to_light, distance);
+        let random_offset = vec3_mul(random_in_unit_sphere(), primitive.sphere_radius);
+        return normalize(vec3_add(light_dir, random_offset));
+    }
+    // For plane and triangle lights, you might want to implement area light sampling
+    return Vec3(0.0, 1.0, 0.0, 0.0);
 }
 
-// Ray tracing logic
+// Ray-sphere intersection
+fn hit_sphere(ray: Ray, primitive: Primitive, t_min: f32, t_max: f32) -> f32 {
+    let oc = vec3_sub(primitive.sphere_center, ray.origin);
+    let a = dot(ray.direction, ray.direction);
+    let h = dot(ray.direction, oc);
+    let c = dot(oc, oc) - primitive.sphere_radius * primitive.sphere_radius;
+    let discriminant = h * h - a * c;
+
+    if (discriminant < 0.0) {
+        return -1.0;
+    }
+
+    let sqrtd = sqrt(discriminant);
+    var root = (h - sqrtd) / a;
+    if (root <= t_min || t_max <= root) {
+        root = (h + sqrtd) / a;
+        if (root <= t_min || t_max <= root) {
+            return -1.0;
+        }
+    }
+    return root;
+}
+
+// Ray-plane intersection
+fn hit_plane(ray: Ray, primitive: Primitive, t_min: f32, t_max: f32) -> f32 {
+    let denom = dot(primitive.plane_normal, ray.direction);
+    if (abs(denom) < 0.0001) {
+        return -1.0; // Ray is parallel to plane
+    }
+    
+    let t = dot(vec3_sub(primitive.plane_point, ray.origin), primitive.plane_normal) / denom;
+    if (t < t_min || t > t_max) {
+        return -1.0;
+    }
+    return t;
+}
+
+// Ray-triangle intersection using Möller-Trumbore algorithm
+fn hit_triangle(ray: Ray, primitive: Primitive, t_min: f32, t_max: f32) -> f32 {
+    let edge1 = vec3_sub(primitive.triangle_v1, primitive.triangle_v0);
+    let edge2 = vec3_sub(primitive.triangle_v2, primitive.triangle_v0);
+    let h = cross(ray.direction, edge2);
+    let a = dot(edge1, h);
+    
+    if (a > -0.00001 && a < 0.00001) {
+        return -1.0; // Ray is parallel to triangle
+    }
+    
+    let f = 1.0 / a;
+    let s = vec3_sub(ray.origin, primitive.triangle_v0);
+    let u = f * dot(s, h);
+    
+    if (u < 0.0 || u > 1.0) {
+        return -1.0;
+    }
+    
+    let q = cross(s, edge1);
+    let v = f * dot(ray.direction, q);
+    
+    if (v < 0.0 || u + v > 1.0) {
+        return -1.0;
+    }
+    
+    let t = f * dot(edge2, q);
+    if (t > t_min && t < t_max) {
+        return t;
+    }
+    
+    return -1.0;
+}
+
+fn cross(a: Vec3, b: Vec3) -> Vec3 {
+    return Vec3(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+        0.0
+    );
+}
+
+fn get_normal_at_hit(ray: Ray, primitive: Primitive, hit_point: Vec3) -> Vec3 {
+    if (primitive.primitive_type == 0u) { // Sphere
+        return normalize(vec3_div(vec3_sub(hit_point, primitive.sphere_center), primitive.sphere_radius));
+    } else if (primitive.primitive_type == 1u) { // Plane
+        return normalize(primitive.plane_normal);
+    } else if (primitive.primitive_type == 2u) { // Triangle
+        let edge1 = vec3_sub(primitive.triangle_v1, primitive.triangle_v0);
+        let edge2 = vec3_sub(primitive.triangle_v2, primitive.triangle_v0);
+        return normalize(cross(edge1, edge2));
+    }
+    return Vec3(0.0, 1.0, 0.0, 0.0); // Default normal
+}
+
+// Updated hit_scene function
 fn hit_scene(ray: Ray, t_min: f32, t_max: f32) -> HitRecord {
     var closest_so_far = t_max;
     var hit: HitRecord;
     hit.t = -1.0;
 
-    for (var i = 0u; i < arrayLength(&spheres); i = i + 1) {
-        let s = spheres[i];
-        let oc = vec3_sub(s.center, ray.origin);
-        let a = dot(ray.direction, ray.direction);
-        let h = dot(ray.direction, oc);
-        let c = dot(oc, oc) - s.radius * s.radius;
-        let discriminant = h * h - a * c;
-
-        if (discriminant >= 0.0) {
-            let sqrtd = sqrt(discriminant);
-            var root = (h - sqrtd) / a;
-            if (root <= t_min || closest_so_far <= root) {
-                root = (h + sqrtd) / a;
-                if (root <= t_min || closest_so_far <= root) { continue; }
+    for (var i = 0u; i < arrayLength(&primitives); i = i + 1) {
+        let primitive = primitives[i];
+        var t = -1.0;
+        
+        if (primitive.primitive_type == 0u) { // Sphere
+            t = hit_sphere(ray, primitive, t_min, closest_so_far);
+        } else if (primitive.primitive_type == 1u) { // Plane
+            t = hit_plane(ray, primitive, t_min, closest_so_far);
+        } else if (primitive.primitive_type == 2u) { // Triangle
+            t = hit_triangle(ray, primitive, t_min, closest_so_far);
+        }
+        
+        if (t > 0.0 && t < closest_so_far) {
+            closest_so_far = t;
+            hit.t = t;
+            hit.p = vec3_add(ray.origin, vec3_mul(ray.direction, t));
+            hit.normal = get_normal_at_hit(ray, primitive, hit.p);
+            hit.front_face = dot(ray.direction, hit.normal) < 0.0;
+            if (!hit.front_face) {
+                hit.normal = vec3_mul(hit.normal, -1.0);
             }
-            
-            closest_so_far = root;
-            hit.t = root;
-            hit.p = vec3_add(ray.origin, vec3_mul(ray.direction, root));
-            let outward_normal = vec3_div(vec3_sub(hit.p, s.center), s.radius);
-            hit.front_face = dot(ray.direction, outward_normal) < 0.0;
-            if (hit.front_face) {
-                hit.normal = outward_normal;
-            } else {
-                hit.normal = vec3_mul(outward_normal, -1.0);
-            }
-            hit.color = s.color;
-            hit.emission = s.emission;
-            hit.reflectivity = s.reflectivity;
+            hit.color = primitive.color;
+            hit.emission = primitive.emission;
+            hit.reflectivity = primitive.reflectivity;
         }
     }
     return hit;
@@ -208,30 +316,22 @@ fn ray_color(initial_ray: Ray) -> Vec3 {
         // Add emission from hit surface
         accumulated_color = vec3_add(accumulated_color, vec3_mul_vec3(hit.emission, attenuation));
         
-        // Add environment lighting contribution
-        let env_light = get_environment_light(hit.normal);
-        let env_contribution = vec3_mul_vec3(
-            vec3_mul_vec3(hit.color, env_light),
-            vec3_mul(attenuation, 0.3) // Adjust environment strength
-        );
-        accumulated_color = vec3_add(accumulated_color, env_contribution);
-        
-        // Direct light sampling - sample each light source
-        for (var light_idx = 0u; light_idx < arrayLength(&spheres); light_idx = light_idx + 1) {
-            let light = spheres[light_idx];
+        // Direct light sampling
+        for (var light_idx = 0u; light_idx < arrayLength(&primitives); light_idx = light_idx + 1) {
+            let light = primitives[light_idx];
             
             // Only sample lights (spheres with emission)
             if (length(light.emission) > 0.0) {
-                let light_dir = sample_light_direction(hit.p, light.center, light.radius);
+                let light_dir = sample_light_direction(hit.p, light);
                 let shadow_ray = Ray(hit.p, light_dir);
                 let shadow_hit = hit_scene(shadow_ray, 0.001, 1e10);
                 
-                // Check if we hit the light (not shadowed)
-                if (shadow_hit.t > 0.0 && length(vec3_sub(shadow_hit.p, light.center)) <= light.radius + 0.001) {
+                // Check if we hit the light (simplified check)
+                if (shadow_hit.t > 0.0 && length(shadow_hit.emission) > 0.0) {
                     let cos_theta = max(0.0, dot(hit.normal, light_dir));
                     let light_contribution = vec3_mul_vec3(
                         vec3_mul_vec3(hit.color, light.emission),
-                        vec3_mul(attenuation, cos_theta * 0.5) // Reduce direct light to balance with environment
+                        vec3_mul(attenuation, cos_theta * 0.5)
                     );
                     accumulated_color = vec3_add(accumulated_color, light_contribution);
                 }
@@ -253,6 +353,7 @@ fn ray_color(initial_ray: Ray) -> Vec3 {
 }
 
 @compute @workgroup_size(16, 16, 1)
+
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let x = global_id.x;
     let y = global_id.y;
@@ -264,7 +365,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     rand_state = (y * uniforms.width + x) * 1973u + uniforms.seed * 9277u + uniforms.frame_number * 12345u;
     
     var pixel_color = Vec3(0.0, 0.0, 0.0, 0.0);
-    for (var i = 0u; i < uniforms.samples_per_pixel; i = i + 1) {
+    var color_sum = Vec3(0.0, 0.0, 0.0, 0.0);
+    var color_squared_sum = Vec3(0.0, 0.0, 0.0, 0.0);
+
+    let base_samples = max(4u, uniforms.samples_per_pixel / 4u);
+    let max_samples = uniforms.samples_per_pixel;
+
+    for (var i = 0u; i < base_samples; i = i + 1) {
         rand_state = pcg_hash(rand_state + i * 5096u);
 
         let u = (f32(x) + random_f32()) / f32(uniforms.width - 1u);
@@ -275,7 +382,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let viewport_x = half_width * (2.0 * u - 1.0);
         let viewport_y = half_height * (2.0 * v - 1.0) / f32(uniforms.char_aspect_ratio);
 
-        // Calculate ray direction using camera vectors
         let direction = normalize(
             vec3_add(
                 vec3_mul(uniforms.camera_right, viewport_x),
@@ -287,10 +393,58 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         );
         let ray = Ray(uniforms.camera_pos, direction);
 
-        pixel_color = vec3_add(pixel_color, ray_color(ray));
+        let sample_color = ray_color(ray);
+        pixel_color = vec3_add(pixel_color, sample_color);
+        color_sum = vec3_add(color_sum, sample_color);
+        color_squared_sum = vec3_add(color_squared_sum, vec3_mul_vec3(sample_color, sample_color));
     }
 
+    // Calculate variance and decide if more samples needed
+    let mean = vec3_div(color_sum, f32(base_samples));
+    let mean_squared = vec3_mul_vec3(mean, mean);
+    let variance_vec = vec3_sub(vec3_div(color_squared_sum, f32(base_samples)), mean_squared);
+    let variance_value = variance_vec.x + variance_vec.y + variance_vec.z; // Sum of RGB variances
+    
+    // Adaptive sampling: add more samples if variance is high
+    if (variance_value > 0.01 && base_samples < max_samples) {
+        let additional_samples = min(max_samples - base_samples, u32(variance_value * 50.0));
+        
+        for (var i = 0u; i < additional_samples; i = i + 1) {
+            rand_state = pcg_hash(rand_state + (base_samples + i) * 5096u);
+
+            let u = (f32(x) + random_f32()) / f32(uniforms.width - 1u);
+            let v = (f32(uniforms.height - 1u - y) + random_f32()) / f32(uniforms.height - 1u);
+
+            let half_height = tan(f32(uniforms.fov_rad) / 2.0);
+            let half_width = f32(uniforms.aspect_ratio) * half_height;
+            let viewport_x = half_width * (2.0 * u - 1.0);
+            let viewport_y = half_height * (2.0 * v - 1.0) / f32(uniforms.char_aspect_ratio);
+
+            let direction = normalize(
+                vec3_add(
+                    vec3_mul(uniforms.camera_right, viewport_x),
+                    vec3_add(
+                        vec3_mul(uniforms.camera_up, viewport_y),
+                        uniforms.camera_forward
+                    )
+                )
+            );
+            let ray = Ray(uniforms.camera_pos, direction);
+
+            pixel_color = vec3_add(pixel_color, ray_color(ray));
+        }
+        
+        // Update total sample count for proper averaging
+        let total_samples = base_samples + additional_samples;
+        pixel_color = vec3_div(vec3_mul(pixel_color, f32(uniforms.samples_per_pixel)), f32(total_samples));
+    }
+
+    // Define index here, before using it
     let index = y * uniforms.width + x;
+    
+    // Store variance information for debugging/visualization
+    variance[index] = VarianceBuffer(variance_value, base_samples);
+
     let current_sample = vec3_div(pixel_color, f32(uniforms.samples_per_pixel));
 
     if (uniforms.frame_number == 0u) {

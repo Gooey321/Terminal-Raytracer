@@ -1,10 +1,10 @@
 mod vec3;
-mod sphere;
+mod primitive; // Add this
 
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use vec3::Vec3;
-use sphere::Sphere;
+use primitive::Primitive; // Add this
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 use serde::{Serialize, Deserialize};
@@ -72,6 +72,8 @@ struct SceneConfig {
     frames_to_accumulate: u32,
     camera: CameraConfig,
     spheres: Vec<SphereConfig>,
+    planes: Option<Vec<PlaneConfig>>, // Add this
+    triangles: Option<Vec<TriangleConfig>>, // Add this
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -89,6 +91,25 @@ struct SphereConfig {
     reflectivity: f64,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct PlaneConfig {
+    point: [f64; 3],
+    normal: [f64; 3],
+    color: [f64; 3],
+    emission: [f64; 3],
+    reflectivity: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TriangleConfig {
+    v0: [f64; 3],
+    v1: [f64; 3],
+    v2: [f64; 3],
+    color: [f64; 3],
+    emission: [f64; 3],
+    reflectivity: f64,
+}
+
 fn load_scene(filename: &str) -> Result<SceneConfig, Box<dyn std::error::Error>> {
     let file_content = std::fs::read_to_string(filename)?;
     let scene: SceneConfig = serde_json::from_str(&file_content)?;
@@ -100,8 +121,8 @@ async fn run(full_color: bool, verbose: bool) {
     let (terminal_width, terminal_height) = terminal::size().unwrap();
     
     // Adjust scene dimensions to fit terminal
-    let mut scene = load_scene("src/scene2.json").expect("Failed to load scene");
-    
+    let mut scene = load_scene("src/scenes/demo.json").expect("Failed to load scene");
+
     // Ensure output fits in terminal
     scene.width = (terminal_width as u32).min(scene.width);
     scene.height = (terminal_height as u32 - 2).min(scene.height); // -2 for status lines
@@ -109,15 +130,46 @@ async fn run(full_color: bool, verbose: bool) {
     // Initialize camera
     let mut camera = Camera::new(Vec3::new(0.0, 0.0, 0.0), -std::f32::consts::PI / 2.0, 0.0);
     
-    let spheres: Vec<Sphere> = scene.spheres.iter().map(|s| {
-        Sphere::new(
+    // Create primitives from scene config
+    let mut primitives = Vec::new();
+    
+    // Add spheres
+    for s in &scene.spheres {
+        primitives.push(Primitive::new_sphere(
             Vec3::new(s.center[0], s.center[1], s.center[2]),
             s.radius,
             Vec3::new(s.color[0], s.color[1], s.color[2]),
             Vec3::new(s.emission[0], s.emission[1], s.emission[2]),
             s.reflectivity,
-        )
-    }).collect();
+        ));
+    }
+    
+    // Add planes if they exist
+    if let Some(planes) = &scene.planes {
+        for p in planes {
+            primitives.push(Primitive::new_plane(
+                Vec3::new(p.point[0], p.point[1], p.point[2]),
+                Vec3::new(p.normal[0], p.normal[1], p.normal[2]),
+                Vec3::new(p.color[0], p.color[1], p.color[2]),
+                Vec3::new(p.emission[0], p.emission[1], p.emission[2]),
+                p.reflectivity,
+            ));
+        }
+    }
+    
+    // Add triangles if they exist
+    if let Some(triangles) = &scene.triangles {
+        for t in triangles {
+            primitives.push(Primitive::new_triangle(
+                Vec3::new(t.v0[0], t.v0[1], t.v0[2]),
+                Vec3::new(t.v1[0], t.v1[1], t.v1[2]),
+                Vec3::new(t.v2[0], t.v2[1], t.v2[2]),
+                Vec3::new(t.color[0], t.color[1], t.color[2]),
+                Vec3::new(t.emission[0], t.emission[1], t.emission[2]),
+                t.reflectivity,
+            ));
+        }
+    }
 
     let instance = wgpu::Instance::default();
     let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await.expect("Failed to find an appropriate adapter");
@@ -137,6 +189,14 @@ async fn run(full_color: bool, verbose: bool) {
         mapped_at_creation: false,
     });
 
+    // Add this after creating the accumulation buffer:
+    let variance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Variance Buffer"),
+        size: (scene.width * scene.height) as u64 * std::mem::size_of::<[f32; 2]>() as u64, // f32 + u32 = 2 * f32
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Uniform Buffer"),
         contents: bytemuck::bytes_of(&Uniforms { // Placeholder
@@ -147,9 +207,9 @@ async fn run(full_color: bool, verbose: bool) {
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
-    let sphere_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Sphere Buffer"),
-        contents: bytemuck::cast_slice(&spheres),
+    let primitive_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Primitive Buffer"),
+        contents: bytemuck::cast_slice(&primitives),
         usage: wgpu::BufferUsages::STORAGE,
     });
 
@@ -175,10 +235,57 @@ async fn run(full_color: bool, verbose: bool) {
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Bind Group Layout"),
         entries: &[
-            wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
-            wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-            wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-            wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // Add this new entry for binding 4:
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
     
@@ -273,9 +380,14 @@ async fn run(full_color: bool, verbose: bool) {
                 layout: &bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: sphere_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: primitive_buffer.as_entire_binding() }, // Changed this line
                     wgpu::BindGroupEntry { binding: 2, resource: output_buffer.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 3, resource: accumulation_buffer.as_entire_binding() },
+                    // Add this new entry for binding 4:
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: variance_buffer.as_entire_binding(),
+                    },
                 ],
             });
 

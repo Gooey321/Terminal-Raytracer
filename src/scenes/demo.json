@@ -1,0 +1,169 @@
+{
+  "width": 200,
+  "height": 100,
+  "samples_per_pixel": 64,
+  "max_depth": 4,
+  "frames_to_accumulate": 100000000,
+  "camera": {
+    "fov_degrees": 50.0,
+    "char_aspect_ratio": 0.55
+  },
+  "spheres": [
+    {
+      "center": [0.0, -1002.0, 0.0],
+      "radius": 1000.0,
+      "color": [0.4, 0.4, 0.4],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.05
+    },
+    {
+      "center": [-2.0, 0.0, -4.0],
+      "radius": 0.8,
+      "color": [0.9, 0.1, 0.1],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.85
+    },
+    {
+      "center": [0.0, -0.5, -3.0],
+      "radius": 0.5,
+      "color": [0.1, 0.8, 0.1],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.3
+    },
+    {
+      "center": [2.0, 0.2, -4.5],
+      "radius": 0.7,
+      "color": [0.1, 0.1, 0.9],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.95
+    },
+    {
+      "center": [-1.0, 1.0, -2.5],
+      "radius": 0.4,
+      "color": [0.8, 0.8, 0.2],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.7
+    },
+    {
+      "center": [1.2, 1.2, -2.8],
+      "radius": 0.3,
+      "color": [0.9, 0.4, 0.7],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.6
+    },
+    {
+      "center": [0.5, 0.8, -1.8],
+      "radius": 0.25,
+      "color": [0.6, 0.9, 0.9],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.4
+    },
+    {
+      "center": [-0.8, -0.2, -2.2],
+      "radius": 0.35,
+      "color": [0.7, 0.3, 0.9],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.5
+    },
+    {
+      "center": [0.0, 3.0, -3.0],
+      "radius": 0.5,
+      "color": [1.0, 1.0, 1.0],
+      "emission": [3.0, 3.0, 3.0],
+      "reflectivity": 0.0
+    },
+    {
+      "center": [-4.0, 2.0, -5.0],
+      "radius": 0.3,
+      "color": [1.0, 0.8, 0.6],
+      "emission": [2.0, 1.6, 1.0],
+      "reflectivity": 0.0
+    },
+    {
+      "center": [4.0, 1.5, -5.0],
+      "radius": 0.4,
+      "color": [0.6, 0.8, 1.0],
+      "emission": [1.0, 1.4, 2.0],
+      "reflectivity": 0.0
+    },
+    {
+      "center": [3.5, -0.5, -1.5],
+      "radius": 0.6,
+      "color": [0.9, 0.9, 0.9],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 1.0
+    }
+  ],
+  "planes": [
+    {
+      "point": [0.0, -2.0, 0.0],
+      "normal": [0.0, 1.0, 0.0],
+      "color": [0.5, 0.5, 0.5],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.1
+    },
+    {
+      "point": [-5.0, 0.0, 0.0],
+      "normal": [1.0, 0.0, 0.0],
+      "color": [0.7, 0.2, 0.2],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.05
+    },
+    {
+      "point": [5.0, 0.0, 0.0],
+      "normal": [-1.0, 0.0, 0.0],
+      "color": [0.2, 0.7, 0.2],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.05
+    },
+    {
+      "point": [0.0, 0.0, -6.0],
+      "normal": [0.0, 0.0, 1.0],
+      "color": [0.6, 0.6, 0.6],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.1
+    }
+  ],
+  "triangles": [
+    {
+      "v0": [-1.5, 1.5, -5.0],
+      "v1": [1.5, 1.5, -5.0],
+      "v2": [0.0, 2.5, -5.0],
+      "color": [0.8, 0.8, 0.2],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.4
+    },
+    {
+      "v0": [-2.5, -1.5, -5.5],
+      "v1": [-1.5, -1.5, -5.5],
+      "v2": [-2.0, -0.5, -5.5],
+      "color": [0.2, 0.8, 0.8],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.6
+    },
+    {
+      "v0": [1.5, -1.5, -5.5],
+      "v1": [2.5, -1.5, -5.5],
+      "v2": [2.0, -0.5, -5.5],
+      "color": [0.8, 0.2, 0.8],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.6
+    },
+    {
+      "v0": [-0.5, -1.8, -2.0],
+      "v1": [0.5, -1.8, -2.0],
+      "v2": [0.0, -1.0, -2.0],
+      "color": [0.9, 0.7, 0.3],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.2
+    },
+    {
+      "v0": [-0.3, -1.0, -1.5],
+      "v1": [0.3, -1.0, -1.5],
+      "v2": [0.0, -0.5, -1.5],
+      "color": [0.6, 0.9, 0.6],
+      "emission": [0.0, 0.0, 0.0],
+      "reflectivity": 0.3
+    }
+  ]
+}
