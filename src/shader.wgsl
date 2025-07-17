@@ -168,6 +168,24 @@ fn hit_scene(ray: Ray, t_min: f32, t_max: f32) -> HitRecord {
     return hit;
 }
 
+// Add skybox function
+fn get_sky_color(direction: Vec3) -> Vec3 {
+    let t = 0.5 * (direction.y + 1.0);
+    let sky_color = vec3_add(
+        vec3_mul(Vec3(1.0, 1.0, 1.0, 0.0), 1.0 - t),
+        vec3_mul(Vec3(0.5, 0.7, 1.0, 0.0), t)
+    );
+    return vec3_mul(sky_color, 0.8); // Adjust intensity
+}
+
+// Add environment lighting function
+fn get_environment_light(direction: Vec3) -> Vec3 {
+    // Simple hemisphere lighting
+    let up_contribution = max(0.0, direction.y) * 0.3;
+    let ambient = Vec3(0.1, 0.15, 0.3, 0.0); // Blue ambient
+    return vec3_add(ambient, vec3_mul(Vec3(0.2, 0.3, 0.6, 0.0), up_contribution));
+}
+
 fn ray_color(initial_ray: Ray) -> Vec3 {
     var accumulated_color = Vec3(0.0, 0.0, 0.0, 0.0);
     var attenuation = Vec3(1.0, 1.0, 1.0, 0.0);
@@ -184,11 +202,22 @@ fn ray_color(initial_ray: Ray) -> Vec3 {
         let hit = hit_scene(current_ray, 0.001, 1e10);
 
         if (hit.t < 0.0) {
-            accumulated_color = vec3_add(accumulated_color, vec3_mul_vec3(Vec3(0.0, 0.0, 0.0, 0.0), attenuation));
+            // Ray missed all objects - return skybox color
+            let sky_color = get_sky_color(current_ray.direction);
+            accumulated_color = vec3_add(accumulated_color, vec3_mul_vec3(sky_color, attenuation));
             break;
         }
 
+        // Add emission from hit surface
         accumulated_color = vec3_add(accumulated_color, vec3_mul_vec3(hit.emission, attenuation));
+        
+        // Add environment lighting contribution
+        let env_light = get_environment_light(hit.normal);
+        let env_contribution = vec3_mul_vec3(
+            vec3_mul_vec3(hit.color, env_light),
+            vec3_mul(attenuation, 0.3) // Adjust environment strength
+        );
+        accumulated_color = vec3_add(accumulated_color, env_contribution);
         
         // Direct light sampling - sample each light source
         for (var light_idx = 0u; light_idx < arrayLength(&spheres); light_idx = light_idx + 1) {
@@ -205,7 +234,7 @@ fn ray_color(initial_ray: Ray) -> Vec3 {
                     let cos_theta = max(0.0, dot(hit.normal, light_dir));
                     let light_contribution = vec3_mul_vec3(
                         vec3_mul_vec3(hit.color, light.emission),
-                        vec3_mul(attenuation, cos_theta)
+                        vec3_mul(attenuation, cos_theta * 0.5) // Reduce direct light to balance with environment
                     );
                     accumulated_color = vec3_add(accumulated_color, light_contribution);
                 }

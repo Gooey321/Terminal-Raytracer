@@ -1,7 +1,8 @@
 mod vec3;
 mod sphere;
 
-use std::time::{Duration};
+use std::time::{Duration, Instant};
+use std::collections::VecDeque;
 use vec3::Vec3;
 use sphere::Sphere;
 use bytemuck::{Pod, Zeroable};
@@ -99,7 +100,7 @@ async fn run(full_color: bool, verbose: bool) {
     let (terminal_width, terminal_height) = terminal::size().unwrap();
     
     // Adjust scene dimensions to fit terminal
-    let mut scene = load_scene("src/scene.json").expect("Failed to load scene");
+    let mut scene = load_scene("src/scene2.json").expect("Failed to load scene");
     
     // Ensure output fits in terminal
     scene.width = (terminal_width as u32).min(scene.width);
@@ -203,6 +204,11 @@ async fn run(full_color: bool, verbose: bool) {
     let mut frame_count = 0;
     let mut camera_moved = true;
     
+    // Frame rate tracking
+    let mut last_frame_time = Instant::now();
+    let mut frame_times = VecDeque::new();
+    let max_frame_samples = 30; // Average over last 30 frames
+    
     // Clear screen once at start
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap();
@@ -300,6 +306,24 @@ async fn run(full_color: bool, verbose: bool) {
             let data = buffer_slice.get_mapped_range();
             let colors: &[Vec3] = bytemuck::cast_slice(&data);
 
+            // Calculate frame rate
+            let current_time = Instant::now();
+            let frame_duration = current_time.duration_since(last_frame_time);
+            last_frame_time = current_time;
+            
+            // Store frame time and maintain rolling average
+            frame_times.push_back(frame_duration);
+            if frame_times.len() > max_frame_samples {
+                frame_times.pop_front();
+            }
+            
+            // Calculate average FPS
+            let avg_frame_time: Duration = frame_times.iter().sum::<Duration>() / frame_times.len() as u32;
+            let fps = 1.0 / avg_frame_time.as_secs_f64();
+            
+            // Calculate render time percentage (time spent actually rendering vs total frame time)
+            let render_time_ms = frame_duration.as_millis();
+
             // Move cursor to top-left WITHOUT clearing screen
             print!("\x1B[1;1H"); // Just move cursor, don't clear
             
@@ -327,8 +351,14 @@ async fn run(full_color: bool, verbose: bool) {
                 frame_buffer.push_str("\r\n");
             }
             
-            // Add status line
-            frame_buffer.push_str(&format!("Frame: {}/{} | Use WASD to move, arrows to look, ESC to exit\x1B[K\r\n", frame_count + 1, scene.frames_to_accumulate));
+            // Enhanced status line with FPS
+            frame_buffer.push_str(&format!(
+                "Frame: {}/{} | FPS: {:.1} | Render: {}ms | WASD: move, arrows: look, ESC: exit\x1B[K\r\n", 
+                frame_count + 1, 
+                scene.frames_to_accumulate,
+                fps,
+                render_time_ms
+            ));
             
             // Output entire frame at once
             print!("{}", frame_buffer);
