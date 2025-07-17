@@ -8,16 +8,25 @@ pub struct Vec3 {
     pub x: f32,
     pub y: f32,
     pub z: f32,
+    pub _padding: f32,  // Add padding to make Vec3 16 bytes
 }
 
 impl Vec3 {
     pub fn new(x: f64, y: f64, z: f64) -> Vec3 {
-        Vec3 { x: x as f32, y: y as f32, z: z as f32 }
+        Vec3 { x: x as f32, y: y as f32, z: z as f32, _padding: 0.0 }
     }
 
     // Add a new function for direct f32 construction
     pub fn new_f32(x: f32, y: f32, z: f32) -> Vec3 {
-        Vec3 { x, y, z }
+        Vec3 { x, y, z, _padding: 0.0 }
+    }
+
+    pub fn cross(self, rhs: Vec3) -> Vec3 {
+        Vec3::new_f32(
+            self.y * rhs.z - self.z * rhs.y,
+            self.z * rhs.x - self.x * rhs.z,
+            self.x * rhs.y - self.y * rhs.x
+        )
     }
 }
 

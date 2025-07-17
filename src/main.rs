@@ -1,12 +1,44 @@
 mod vec3;
 mod sphere;
 
-use std::time::Instant;
+use std::time::{Duration};
 use vec3::Vec3;
 use sphere::Sphere;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 use serde::{Serialize, Deserialize};
+use crossterm::{
+    event::{self, Event, KeyCode},
+    terminal,
+    cursor,
+    execute,
+};
+use std::io::{self, Write};
+
+// Camera struct to hold position and orientation
+struct Camera {
+    position: Vec3,
+    yaw: f32,   // Rotation around the Y axis
+    pitch: f32, // Rotation around the X axis
+}
+
+impl Camera {
+    fn new(position: Vec3, yaw: f32, pitch: f32) -> Self {
+        Self { position, yaw, pitch }
+    }
+
+    // Calculate forward, right, and up vectors for the camera
+    fn calculate_vectors(&self) -> (Vec3, Vec3, Vec3) {
+        let forward = Vec3::new_f32(
+            self.yaw.cos() * self.pitch.cos(),
+            self.pitch.sin(),
+            self.yaw.sin() * self.pitch.cos(),
+        );
+        let right = Vec3::new_f32(-self.yaw.sin(), 0.0, self.yaw.cos());
+        let up = right.cross(forward);
+        (forward, right, up)
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -23,7 +55,13 @@ struct Uniforms {
     char_aspect_ratio: f32,
     fov_rad: f32,
     _padding3: f32,
+    // New camera fields
+    camera_pos: Vec3,
+    camera_forward: Vec3,
+    camera_right: Vec3,
+    camera_up: Vec3,
 }
+
 #[derive(Serialize, Deserialize, Debug)]
 struct SceneConfig {
     width: u32,
@@ -56,24 +94,19 @@ fn load_scene(filename: &str) -> Result<SceneConfig, Box<dyn std::error::Error>>
     Ok(scene)
 }
 
-fn write_color(pixel_color: Vec3, full_color: bool) {
-    let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-    let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-    let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+async fn run(full_color: bool, verbose: bool) {
+    // Get terminal size to adjust output
+    let (terminal_width, terminal_height) = terminal::size().unwrap();
+    
+    // Adjust scene dimensions to fit terminal
+    let mut scene = load_scene("src/scene.json").expect("Failed to load scene");
+    
+    // Ensure output fits in terminal
+    scene.width = (terminal_width as u32).min(scene.width);
+    scene.height = (terminal_height as u32 - 2).min(scene.height); // -2 for status lines
 
-    let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
-
-    if full_color {
-        print!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b);
-    } else {
-        let chars = ['@', '%', '#', 'a', '*', '+', '=', '-', ':', '.', '@'];
-        let index = (brightness.sqrt() * (chars.len() - 1) as f32).min((chars.len() - 1) as f32) as usize;
-        print!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, chars[index]);
-    }
-}
-
-async fn run(full_color: bool, verbose: bool,) {
-    let scene = load_scene("src/scene.json").expect("Failed to load scene");
+    // Initialize camera
+    let mut camera = Camera::new(Vec3::new(0.0, 0.0, 0.0), -std::f32::consts::PI / 2.0, 0.0);
     
     let spheres: Vec<Sphere> = scene.spheres.iter().map(|s| {
         Sphere::new(
@@ -90,23 +123,10 @@ async fn run(full_color: bool, verbose: bool,) {
     let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.expect("Failed to create device");
 
     let limits = device.limits();
-    println!("Max workgroup size: {:?}", limits.max_compute_workgroup_size_x);
-    println!("Max workgroup invocations: {}", limits.max_compute_invocations_per_workgroup);
-
-    let uniforms = Uniforms {
-        width: scene.width,
-        height: scene.height,
-        samples_per_pixel: scene.samples_per_pixel,
-        max_depth: scene.max_depth,
-        seed: rand::random(),
-        aspect_ratio: scene.width as f32 / scene.height as f32,
-        char_aspect_ratio: scene.camera.char_aspect_ratio,
-        fov_rad: scene.camera.fov_degrees.to_radians(),
-        frame_number: 0,
-        _padding1: 0,
-        _padding2: 0,
-        _padding3: 0.0,
-    };
+    if verbose {
+        println!("Max workgroup size: {:?}", limits.max_compute_workgroup_size_x);
+        println!("Max workgroup invocations: {}", limits.max_compute_invocations_per_workgroup);
+    }
 
     let output_buffer_size = (scene.width * scene.height * std::mem::size_of::<Vec3>() as u32) as wgpu::BufferAddress;
     let accumulation_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -118,7 +138,12 @@ async fn run(full_color: bool, verbose: bool,) {
 
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Uniform Buffer"),
-        contents: bytemuck::bytes_of(&uniforms),
+        contents: bytemuck::bytes_of(&Uniforms { // Placeholder
+            width: 0, height: 0, samples_per_pixel: 0, max_depth: 0, seed: 0, frame_number: 0,
+            _padding1: 0, _padding2: 0, aspect_ratio: 0.0, char_aspect_ratio: 0.0, fov_rad: 0.0,
+            _padding3: 0.0, camera_pos: Vec3::new(0.0,0.0,0.0), camera_forward: Vec3::new(0.0,0.0,0.0),
+            camera_right: Vec3::new(0.0,0.0,0.0), camera_up: Vec3::new(0.0,0.0,0.0)
+        }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
     let sphere_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -171,111 +196,179 @@ async fn run(full_color: bool, verbose: bool,) {
         cache: None,
     });
 
-    println!("Starting temporal accumulation render...");
-    let start = Instant::now();
+    // Enter raw mode and hide cursor
+    terminal::enable_raw_mode().unwrap();
+    execute!(io::stdout(), cursor::Hide).unwrap();
     
-    // Render loop for temporal accumulation
-    for frame in 0..scene.frames_to_accumulate {
-        // Update uniforms for this frame
-        let frame_uniforms = Uniforms {
-            width: scene.width,
-            height: scene.height,
-            samples_per_pixel: scene.samples_per_pixel,
-            max_depth: scene.max_depth,
-            seed: rand::random::<u32>().wrapping_add(frame),
-            aspect_ratio: scene.width as f32 / scene.height as f32,
-            char_aspect_ratio: scene.camera.char_aspect_ratio,
-            fov_rad: scene.camera.fov_degrees.to_radians(),
-            frame_number: frame,
-            _padding1: 0,
-            _padding2: 0,
-            _padding3: 0.0,
-        };
-        
-        // Update uniform buffer
-        queue.write_buffer(&uniform_buffer, 0, bytemuck::bytes_of(&frame_uniforms));
-        
-        // Create bind group for this frame
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Bind Group"), 
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: sphere_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: output_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: accumulation_buffer.as_entire_binding() },
-            ],
-        });
-
-        // Render this frame
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-            cpass.set_pipeline(&pipeline);
-            cpass.set_bind_group(0, &bind_group, &[]);
-            cpass.dispatch_workgroups(
-                (scene.width + 15) / 16,
-                (scene.height + 15) / 16, 
-                1);
+    let mut frame_count = 0;
+    let mut camera_moved = true;
+    
+    // Clear screen once at start
+    print!("\x1B[2J\x1B[1;1H");
+    io::stdout().flush().unwrap();
+    
+    // Main loop
+    loop {
+        // Handle input
+        let mut moved_this_frame = false;
+        if event::poll(Duration::from_millis(1)).unwrap() {
+            if let Event::Key(key) = event::read().unwrap() {
+                let (forward, right, _) = camera.calculate_vectors();
+                match key.code {
+                    KeyCode::Char('w') => { camera.position = camera.position + forward * 0.1; moved_this_frame = true; }
+                    KeyCode::Char('s') => { camera.position = camera.position - forward * 0.1; moved_this_frame = true; }
+                    KeyCode::Char('a') => { camera.position = camera.position - right * 0.1; moved_this_frame = true; }
+                    KeyCode::Char('d') => { camera.position = camera.position + right * 0.1; moved_this_frame = true; }
+                    KeyCode::Up => { camera.pitch += 0.05; moved_this_frame = true; }
+                    KeyCode::Down => { camera.pitch -= 0.05; moved_this_frame = true; }
+                    KeyCode::Left => { camera.yaw -= 0.05; moved_this_frame = true; }
+                    KeyCode::Right => { camera.yaw += 0.05; moved_this_frame = true; }
+                    KeyCode::Esc => break, // Exit loop
+                    _ => {}
+                }
+                camera.pitch = camera.pitch.clamp(-1.5, 1.5); // Clamp pitch
+            }
         }
-        queue.submit(Some(encoder.finish()));
+
+        if moved_this_frame {
+            camera_moved = true;
+            frame_count = 0; // Reset frame count for accumulation
+        }
         
-        // Show progress if verbose mode is enabled
-        if verbose && (frame % 16 == 0 || frame == scene.frames_to_accumulate - 1) {
-            println!("Frame {}/{}", frame + 1, scene.frames_to_accumulate);
+        // Render loop for temporal accumulation
+        if frame_count < scene.frames_to_accumulate {
+            // Update uniforms for this frame
+            let (forward, right, up) = camera.calculate_vectors();
+            let frame_uniforms = Uniforms {
+                width: scene.width,
+                height: scene.height,
+                samples_per_pixel: scene.samples_per_pixel,
+                max_depth: scene.max_depth,
+                seed: rand::random::<u32>().wrapping_add(frame_count),
+                aspect_ratio: scene.width as f32 / scene.height as f32,
+                char_aspect_ratio: scene.camera.char_aspect_ratio,
+                fov_rad: scene.camera.fov_degrees.to_radians(),
+                frame_number: if camera_moved { 0 } else { frame_count },
+                _padding1: 0,
+                _padding2: 0,
+                _padding3: 0.0,
+                camera_pos: camera.position,
+                camera_forward: forward,
+                camera_right: right,
+                camera_up: up,
+            };
+            
+            // Update uniform buffer
+            queue.write_buffer(&uniform_buffer, 0, bytemuck::bytes_of(&frame_uniforms));
+            
+            // Create bind group for this frame
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Bind Group"), 
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: sphere_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: output_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: accumulation_buffer.as_entire_binding() },
+                ],
+            });
+
+            // Render this frame
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                cpass.set_pipeline(&pipeline);
+                cpass.set_bind_group(0, &bind_group, &[]);
+                cpass.dispatch_workgroups(
+                    (scene.width + 15) / 16,
+                    (scene.height + 15) / 16, 
+                    1);
+            }
+            queue.submit(Some(encoder.finish()));
+            
+            // Copy final result to staging buffer and render
+            let mut display_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            display_encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_buffer_size);
+            queue.submit(Some(display_encoder.finish()));
+            
+            let buffer_slice = staging_buffer.slice(..);
+            buffer_slice.map_async(wgpu::MapMode::Read, |result| {
+                result.unwrap();
+            });
+            let _ = device.poll(wgpu::MaintainBase::Wait);
+            
+            let data = buffer_slice.get_mapped_range();
+            let colors: &[Vec3] = bytemuck::cast_slice(&data);
+
+            // Move cursor to top-left WITHOUT clearing screen
+            print!("\x1B[1;1H"); // Just move cursor, don't clear
+            
+            // Build the entire frame in memory first
+            let mut frame_buffer = String::with_capacity((scene.width * scene.height * 20) as usize);
+            
+            for j in 0..scene.height {
+                for i in 0..scene.width {
+                    let index = (j * scene.width + i) as usize;
+                    let pixel_color = colors[index];
+                    
+                    let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                    let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                    let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                    
+                    if full_color {
+                        frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b));
+                    } else {
+                        let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
+                        let chars = [' ', '.', ':', '-', '=', '+', '*', 'a', '#', '%', '@'];
+                        let index = (brightness.sqrt() * (chars.len() - 1) as f32).min((chars.len() - 1) as f32) as usize;
+                        frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, chars[index]));
+                    }
+                }
+                frame_buffer.push_str("\r\n");
+            }
+            
+            // Add status line
+            frame_buffer.push_str(&format!("Frame: {}/{} | Use WASD to move, arrows to look, ESC to exit\x1B[K\r\n", frame_count + 1, scene.frames_to_accumulate));
+            
+            // Output entire frame at once
+            print!("{}", frame_buffer);
+            io::stdout().flush().unwrap();
+            
+            drop(data);
+            staging_buffer.unmap();
+            
+            frame_count += 1;
+            camera_moved = false;
+        } else {
+            // If accumulation is finished, just wait for input
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
 
-    // Copy final result to staging buffer
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-    encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_buffer_size);
-    queue.submit(Some(encoder.finish()));
-
-    let buffer_slice = staging_buffer.slice(..);
-    let mapping_complete = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mapping_complete_clone = mapping_complete.clone();
-    
-    buffer_slice.map_async(wgpu::MapMode::Read, move |_result| {
-        mapping_complete_clone.store(true, std::sync::atomic::Ordering::Relaxed);
-    });
-    
-    // Poll the device until mapping is complete
-    while !mapping_complete.load(std::sync::atomic::Ordering::Relaxed) {
-        let _ = device.poll(wgpu::MaintainBase::Poll);
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
-
-    let data = buffer_slice.get_mapped_range();
-    let colors: &[Vec3] = bytemuck::cast_slice(&data);
-
-    for j in 0..scene.height {
-        for i in 0..scene.width {
-            let index = (j * scene.width + i) as usize;
-            write_color(colors[index], full_color);
-        }
-        println!();
-    }
-    drop(data);
-    staging_buffer.unmap();
-
-    let duration = start.elapsed();
-    println!("Temporal accumulation completed in: {:?}", duration);
-    let time_per_pixel = duration.as_secs_f64() / (scene.width * scene.height) as f64;
-    println!("Time per pixel: {:.6} seconds", time_per_pixel);
-    println!("Total effective samples: {}", scene.samples_per_pixel * scene.frames_to_accumulate);
-    println!("Image dimensions: {}x{}", scene.width, scene.height);
+    // Restore terminal state before exiting
+    execute!(io::stdout(), cursor::Show).unwrap();
+    terminal::disable_raw_mode().unwrap();
+    println!("Exiting.");
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let full_color = args.contains(&"--full-color".to_string());
-    let verbose = args.contains(&"--verbose".to_string());
     
-    if full_color { println!("outputting with █ characters"); } 
-    else { println!("outputting with ASCII characters"); }
+    // Fix argument parsing - you're running with "release" as first arg
+    let full_color = args.iter().any(|arg| arg == "--full-color");
+    let verbose = args.iter().any(|arg| arg == "--verbose");
+    
+    if full_color { 
+        println!("outputting with █ characters"); 
+    } else { 
+        println!("outputting with ASCII characters"); 
+    }
 
-    if verbose { println!("Verbose mode enabled"); }
-    else { println!("Detailed output disabled"); }
+    if verbose { 
+        println!("Verbose mode enabled"); 
+    } else { 
+        println!("Detailed output disabled"); 
+    }
 
     // Use pollster to run the async run function to completion.
     pollster::block_on(run(full_color, verbose));

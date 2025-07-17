@@ -2,16 +2,21 @@ struct Vec3 {
     x: f32,
     y: f32,
     z: f32,
+    _padding: f32,
 };
 
 struct Sphere {
     center: Vec3,
     radius: f32,
+    _padding1: f32,
+    _padding2: f32,
+    _padding3: f32,
     color: Vec3,
     emission: Vec3,
     reflectivity: f32,
-    _p1: f32,
-    _p2: f32,  
+    _padding4: f32,
+    _padding5: f32,
+    _padding6: f32,
 }
 
 struct Ray {
@@ -41,7 +46,11 @@ struct Uniforms {
     aspect_ratio: f32,
     char_aspect_ratio: f32,
     fov_rad: f32,
-    _padding3: f32
+    _padding3: f32,
+    camera_pos: Vec3,
+    camera_forward: Vec3,
+    camera_right: Vec3,
+    camera_up: Vec3,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -51,23 +60,23 @@ struct Uniforms {
 
 // Vector operations
 fn vec3_add(a: Vec3, b: Vec3) -> Vec3 {
-    return Vec3(a.x + b.x, a.y + b.y, a.z + b.z);
+    return Vec3(a.x + b.x, a.y + b.y, a.z + b.z, 0.0);
 }
 
 fn vec3_sub(a: Vec3, b: Vec3) -> Vec3 {
-    return Vec3(a.x - b.x, a.y - b.y, a.z - b.z);
+    return Vec3(a.x - b.x, a.y - b.y, a.z - b.z, 0.0);
 }
 
 fn vec3_mul(a: Vec3, s: f32) -> Vec3 {
-    return Vec3(a.x * s, a.y * s, a.z * s);
+    return Vec3(a.x * s, a.y * s, a.z * s, 0.0);
 }
 
 fn vec3_mul_vec3(a: Vec3, b: Vec3) -> Vec3 {
-    return Vec3(a.x * b.x, a.y * b.y, a.z * b.z);
+    return Vec3(a.x * b.x, a.y * b.y, a.z * b.z, 0.0);
 }
 
 fn vec3_div(a: Vec3, s: f32) -> Vec3 {
-    return Vec3(a.x / s, a.y / s, a.z / s);
+    return Vec3(a.x / s, a.y / s, a.z / s, 0.0);
 }
 
 // Utility functions
@@ -86,11 +95,11 @@ fn random_f32() -> f32 {
 
 fn random_in_unit_sphere() -> Vec3 {
     for (var i = 0; i < 100; i = i + 1) {
-        let p = Vec3(random_f32() * 2.0 - 1.0, random_f32() * 2.0 - 1.0, random_f32() * 2.0 - 1.0);
+        let p = Vec3(random_f32() * 2.0 - 1.0, random_f32() * 2.0 - 1.0, random_f32() * 2.0 - 1.0, 0.0);
         if (dot(p,p) < 1.0) { return p; }
     }
     // Fallback if we don't find a point in the sphere after 100 tries
-    return Vec3(0.0, 1.0, 0.0);
+    return Vec3(0.0, 1.0, 0.0, 0.0);
 }
 
 fn dot(a: Vec3, b: Vec3) -> f32 { 
@@ -160,8 +169,8 @@ fn hit_scene(ray: Ray, t_min: f32, t_max: f32) -> HitRecord {
 }
 
 fn ray_color(initial_ray: Ray) -> Vec3 {
-    var accumulated_color = Vec3(0.0, 0.0, 0.0);
-    var attenuation = Vec3(1.0, 1.0, 1.0);
+    var accumulated_color = Vec3(0.0, 0.0, 0.0, 0.0);
+    var attenuation = Vec3(1.0, 1.0, 1.0, 0.0);
     var current_ray = initial_ray;
 
     for (var i = 0u; i < uniforms.max_depth; i = i + 1) {
@@ -175,7 +184,7 @@ fn ray_color(initial_ray: Ray) -> Vec3 {
         let hit = hit_scene(current_ray, 0.001, 1e10);
 
         if (hit.t < 0.0) {
-            accumulated_color = vec3_add(accumulated_color, vec3_mul_vec3(Vec3(0.0, 0.0, 0.0), attenuation));
+            accumulated_color = vec3_add(accumulated_color, vec3_mul_vec3(Vec3(0.0, 0.0, 0.0, 0.0), attenuation));
             break;
         }
 
@@ -228,7 +237,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     rand_state = (y * uniforms.width + x) * 1973u + uniforms.seed * 9277u + uniforms.frame_number * 12345u;
     
-    var pixel_color = Vec3(0.0, 0.0, 0.0);
+    var pixel_color = Vec3(0.0, 0.0, 0.0, 0.0);
     for (var i = 0u; i < uniforms.samples_per_pixel; i = i + 1) {
         rand_state = pcg_hash(rand_state + i * 5096u);
 
@@ -240,8 +249,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let viewport_x = half_width * (2.0 * u - 1.0);
         let viewport_y = half_height * (2.0 * v - 1.0) / f32(uniforms.char_aspect_ratio);
 
-        let direction = normalize(Vec3(viewport_x, viewport_y, -1.0));
-        let ray = Ray(Vec3(0.0, 0.0, 0.0), direction);
+        // Calculate ray direction using camera vectors
+        let direction = normalize(
+            vec3_add(
+                vec3_mul(uniforms.camera_right, viewport_x),
+                vec3_add(
+                    vec3_mul(uniforms.camera_up, viewport_y),
+                    uniforms.camera_forward
+                )
+            )
+        );
+        let ray = Ray(uniforms.camera_pos, direction);
 
         pixel_color = vec3_add(pixel_color, ray_color(ray));
     }
@@ -251,7 +269,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if (uniforms.frame_number == 0u) {
         accumulation[index] = current_sample;
-        pixels[index] = current_sample;
     } else {
         let alpha = 1.0 / f32(uniforms.frame_number + 1u);
         accumulation[index] = vec3_add(
