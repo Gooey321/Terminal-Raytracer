@@ -43,6 +43,17 @@ impl Camera {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct SunConfig {
+    direction: Vec3,
+    color: Vec3,
+    intensity: f32,
+    angular_size: f32,
+    _padding1: f32,
+    _padding2: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
 struct Uniforms {
     width: u32,
     height: u32,
@@ -56,11 +67,11 @@ struct Uniforms {
     char_aspect_ratio: f32,
     fov_rad: f32,
     _padding3: f32,
-    // New camera fields
     camera_pos: Vec3,
     camera_forward: Vec3,
     camera_right: Vec3,
     camera_up: Vec3,
+    sun: SunConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -122,7 +133,7 @@ async fn run(full_color: bool, verbose: bool) {
     let (terminal_width, terminal_height) = terminal::size().unwrap();
     
     // Adjust scene dimensions to fit terminal
-    let mut scene = load_scene("src/scenes/scene.json").expect("Failed to load scene");
+    let mut scene = load_scene("src/scenes/demo.json").expect("Failed to load scene");
     
     // Ensure output fits in terminal
     scene.width = (terminal_width as u32).min(scene.width);
@@ -200,7 +211,15 @@ async fn run(full_color: bool, verbose: bool) {
             width: 0, height: 0, samples_per_pixel: 0, max_depth: 0, seed: 0, frame_number: 0,
             _padding1: 0, _padding2: 0, aspect_ratio: 0.0, char_aspect_ratio: 0.0, fov_rad: 0.0,
             _padding3: 0.0, camera_pos: Vec3::new(0.0,0.0,0.0), camera_forward: Vec3::new(0.0,0.0,0.0),
-            camera_right: Vec3::new(0.0,0.0,0.0), camera_up: Vec3::new(0.0,0.0,0.0)
+            camera_right: Vec3::new(0.0,0.0,0.0), camera_up: Vec3::new(0.0,0.0,0.0),
+            sun: SunConfig {
+                direction: Vec3::new(0.0, 0.0, 0.0),
+                color: Vec3::new(0.0, 0.0, 0.0),
+                intensity: 0.0,
+                angular_size: 0.0,
+                _padding1: 0.0,
+                _padding2: 0.0,
+            }
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -333,6 +352,14 @@ async fn run(full_color: bool, verbose: bool) {
                 camera_forward: forward,
                 camera_right: right,
                 camera_up: up,
+                sun: SunConfig {
+                    direction: Vec3::new(-0.6, 0.8, -0.3), // Sun coming from upper left
+                    color: Vec3::new(1.0, 0.9, 0.7),       // Warm sun color
+                    intensity: 100.0,                         // Sun brightness
+                    angular_size: 0.2,                     // Sun size in radians (realistic)
+                    _padding1: 0.0,
+                    _padding2: 0.0,
+                },
             };
             
             // Update uniform buffer

@@ -46,6 +46,15 @@ struct HitRecord {
     reflectivity: f32,
 };
 
+struct SunConfig {
+    direction: Vec3,
+    color: Vec3,
+    intensity: f32,
+    angular_size: f32,
+    _padding1: f32,
+    _padding2: f32,
+};
+
 struct Uniforms {
     width: u32,
     height: u32,
@@ -63,6 +72,7 @@ struct Uniforms {
     camera_forward: Vec3,
     camera_right: Vec3,
     camera_up: Vec3,
+    sun: SunConfig,
 };
 
 struct VarianceBuffer {
@@ -71,7 +81,7 @@ struct VarianceBuffer {
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> primitives: array<Primitive>; // Changed from spheres
+@group(0) @binding(1) var<storage, read> primitives: array<Primitive>;
 @group(0) @binding(2) var<storage, read_write> pixels: array<Vec3>;
 @group(0) @binding(3) var<storage, read_write> accumulation: array<Vec3>;
 @group(0) @binding(4) var<storage, read_write> variance: array<VarianceBuffer>;
@@ -136,16 +146,32 @@ fn reflect(v: Vec3, n: Vec3) -> Vec3 {
     return vec3_sub(v, vec3_mul(n, 2.0 * dot(v, n))); 
 }
 
+fn cross(a: Vec3, b: Vec3) -> Vec3 {
+    return Vec3(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+        0.0
+    );
+}
+
+fn clamp(value: f32, min_val: f32, max_val: f32) -> f32 {
+    return max(min_val, min(max_val, value));
+}
+
+fn acos(x: f32) -> f32 {
+    return atan2(sqrt(1.0 - x * x), x);
+}
+
 fn sample_light_direction(hit_point: Vec3, primitive: Primitive) -> Vec3 {
-    if (primitive.primitive_type == 0u) { // Sphere light
+    if (primitive.primitive_type == 0u) {
         let to_light = vec3_sub(primitive.sphere_center, hit_point);
         let distance = length(to_light);
         let light_dir = vec3_div(to_light, distance);
         let random_offset = vec3_mul(random_in_unit_sphere(), primitive.sphere_radius);
         return normalize(vec3_add(light_dir, random_offset));
     }
-    // For plane and triangle lights, you might want to implement area light sampling
-    return Vec3(0.0, 1.0, 0.0, 0.0);
+    return Vec3(0.0, 1.0, 0.0, 0.0); // FIX: Added the 4th component for padding
 }
 
 // Ray-sphere intersection
@@ -219,15 +245,6 @@ fn hit_triangle(ray: Ray, primitive: Primitive, t_min: f32, t_max: f32) -> f32 {
     return -1.0;
 }
 
-fn cross(a: Vec3, b: Vec3) -> Vec3 {
-    return Vec3(
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x,
-        0.0
-    );
-}
-
 fn get_normal_at_hit(ray: Ray, primitive: Primitive, hit_point: Vec3) -> Vec3 {
     if (primitive.primitive_type == 0u) { // Sphere
         return normalize(vec3_div(vec3_sub(hit_point, primitive.sphere_center), primitive.sphere_radius));
@@ -276,84 +293,155 @@ fn hit_scene(ray: Ray, t_min: f32, t_max: f32) -> HitRecord {
     return hit;
 }
 
-// Add skybox function
-fn get_sky_color(direction: Vec3) -> Vec3 {
-    let t = 0.5 * (direction.y + 1.0);
-    let sky_color = vec3_add(
-        vec3_mul(Vec3(1.0, 1.0, 1.0, 0.0), 1.0 - t),
-        vec3_mul(Vec3(0.5, 0.7, 1.0, 0.0), t)
-    );
-    return vec3_mul(sky_color, 0.8); // Adjust intensity
-}
-
-// Add environment lighting function
-fn get_environment_light(direction: Vec3) -> Vec3 {
+// Replace the get_sky_color function with a simple background
+fn get_background_color(direction: Vec3) -> Vec3 {
+    // Simple solid color background (dark gray/black)
     return Vec3(0.0, 0.0, 0.0, 0.0);
 }
 
+// Update the ray_color function
 fn ray_color(initial_ray: Ray) -> Vec3 {
     var accumulated_color = Vec3(0.0, 0.0, 0.0, 0.0);
     var attenuation = Vec3(1.0, 1.0, 1.0, 0.0);
     var current_ray = initial_ray;
 
     for (var i = 0u; i < uniforms.max_depth; i = i + 1) {
-        if (i > 2u) {
-            let survival_prob = max(attenuation.x, max(attenuation.y, attenuation.z));
+        let hit = hit_scene(current_ray, 0.001, 1e10);
+
+        if (hit.t < 0.0) {
+            return vec3_add(accumulated_color, vec3_mul_vec3(get_background_color(current_ray.direction), attenuation));
+        }
+
+        // Add emission from directly hit emissive surfaces
+        accumulated_color = vec3_add(accumulated_color, vec3_mul_vec3(hit.emission, attenuation));
+        
+        // NEXT EVENT ESTIMATION: Direct lighting calculation
+        // Sample all light sources for direct illumination
+        for (var light_idx = 0u; light_idx < arrayLength(&primitives); light_idx = light_idx + 1) {
+            let light_primitive = primitives[light_idx];
+            
+            // Check if this primitive is a light source
+            let light_power = light_primitive.emission.x + light_primitive.emission.y + light_primitive.emission.z;
+            if (light_power > 0.001) {
+                
+                // Sample a point on the light source
+                var light_point: Vec3;
+                var light_normal: Vec3;
+                var light_area: f32;
+                
+                if (light_primitive.primitive_type == 0u) { // Sphere light
+                    // Sample random point on sphere surface
+                    let random_dir = normalize(random_in_unit_sphere());
+                    light_point = vec3_add(light_primitive.sphere_center, 
+                                         vec3_mul(random_dir, light_primitive.sphere_radius));
+                    light_normal = random_dir;
+                    light_area = 4.0 * 3.14159 * light_primitive.sphere_radius * light_primitive.sphere_radius;
+                } else {
+                    continue; // Skip non-sphere lights for simplicity
+                }
+                
+                // Calculate light direction and distance
+                let light_vec = vec3_sub(light_point, hit.p);
+                let light_distance = length(light_vec);
+                let light_dir = vec3_div(light_vec, light_distance);
+                
+                // Check visibility with shadow ray
+                let shadow_ray = Ray(hit.p, light_dir);
+                let shadow_hit = hit_scene(shadow_ray, 0.001, light_distance - 0.001);
+                
+                // If not in shadow, calculate direct lighting contribution
+                if (shadow_hit.t < 0.0) {
+                    let cos_theta_surface = max(0.0, dot(hit.normal, light_dir));
+                    let cos_theta_light = max(0.0, dot(light_normal, vec3_mul(light_dir, -1.0)));
+                    
+                    if (cos_theta_surface > 0.0 && cos_theta_light > 0.0) {
+                        // Calculate geometric term (inverse square law + cosine terms)
+                        let distance_sq = light_distance * light_distance;
+                        let geometric_term = (cos_theta_surface * cos_theta_light) / distance_sq;
+                        
+                        // BRDF evaluation (Lambertian diffuse)
+                        let brdf = vec3_div(hit.color, 3.14159); // Lambertian BRDF = albedo/π
+                        
+                        // Calculate direct lighting contribution
+                        let direct_light = vec3_mul_vec3(
+                            vec3_mul_vec3(brdf, light_primitive.emission),
+                            vec3_mul(attenuation, geometric_term * light_area)
+                        );
+                        
+                        accumulated_color = vec3_add(accumulated_color, direct_light);
+                    }
+                }
+            }
+        }
+        
+        // INDIRECT LIGHTING: Sample next bounce direction
+        var scatter_direction: Vec3;
+        var pdf: f32;
+        
+        let is_reflective = hit.reflectivity > random_f32();
+        
+        if (is_reflective) {
+            // Perfect specular reflection
+            scatter_direction = reflect(current_ray.direction, hit.normal);
+            pdf = 1.0; // Delta function
+        } else {
+            // Cosine-weighted hemisphere sampling (importance sampling for Lambertian BRDF)
+            let random1 = random_f32();
+            let random2 = random_f32();
+            
+            // Generate cosine-weighted direction
+            let cos_theta = sqrt(random1);
+            let sin_theta = sqrt(1.0 - random1);
+            let phi = 2.0 * 3.14159 * random2;
+            
+            // Local coordinates (normal = z-axis)
+            let local_dir = Vec3(sin_theta * cos(phi), sin_theta * sin(phi), cos_theta, 0.0);
+            
+            var up: Vec3;
+            if (abs(hit.normal.x) > 0.9) {
+                up = Vec3(1.0, 0.0, 0.0, 0.0);
+            } else {
+                up = Vec3(0.0, 1.0, 0.0, 0.0);
+            }
+            let tangent = normalize(cross(up, hit.normal));
+            let bitangent = cross(hit.normal, tangent);
+            
+            scatter_direction = normalize(vec3_add(
+                vec3_add(
+                    vec3_mul(tangent, local_dir.x),
+                    vec3_mul(bitangent, local_dir.y)
+                ),
+                vec3_mul(hit.normal, local_dir.z)
+            ));
+            
+            pdf = cos_theta / 3.14159; // PDF for cosine-weighted sampling
+        }
+        
+        // Update attenuation for next bounce
+        if (is_reflective) {
+            attenuation = vec3_mul_vec3(attenuation, hit.color);
+        } else {
+            // For Lambertian surfaces: BRDF * cos(theta) / PDF
+            let cos_theta = max(0.0, dot(hit.normal, scatter_direction));
+            let brdf_value = vec3_div(hit.color, 3.14159);
+            attenuation = vec3_mul_vec3(attenuation, vec3_mul(brdf_value, cos_theta / pdf));
+        }
+        
+        current_ray = Ray(hit.p, scatter_direction);
+
+        // Russian Roulette path termination (more aggressive for realism)
+        if (i > 1u) {
+            let survival_prob = min(0.95, max(attenuation.x, max(attenuation.y, attenuation.z)));
             if (survival_prob < random_f32()) {
                 break;
             }
             attenuation = vec3_div(attenuation, survival_prob);
-        }
-        let hit = hit_scene(current_ray, 0.001, 1e10);
-
-        if (hit.t < 0.0) {
-            // Ray missed all objects - return skybox color
-            let sky_color = get_sky_color(current_ray.direction);
-            accumulated_color = vec3_add(accumulated_color, vec3_mul_vec3(sky_color, attenuation));
-            break;
-        }
-
-        // Add emission from hit surface
-        accumulated_color = vec3_add(accumulated_color, vec3_mul_vec3(hit.emission, attenuation));
-        
-        // Direct light sampling
-        for (var light_idx = 0u; light_idx < arrayLength(&primitives); light_idx = light_idx + 1) {
-            let light = primitives[light_idx];
-            
-            // Only sample lights (spheres with emission)
-            if (length(light.emission) > 0.0) {
-                let light_dir = sample_light_direction(hit.p, light);
-                let shadow_ray = Ray(hit.p, light_dir);
-                let shadow_hit = hit_scene(shadow_ray, 0.001, 1e10);
-                
-                // Check if we hit the light (simplified check)
-                if (shadow_hit.t > 0.0 && length(shadow_hit.emission) > 0.0) {
-                    let cos_theta = max(0.0, dot(hit.normal, light_dir));
-                    let light_contribution = vec3_mul_vec3(
-                        vec3_mul_vec3(hit.color, light.emission),
-                        vec3_mul(attenuation, cos_theta * 0.5)
-                    );
-                    accumulated_color = vec3_add(accumulated_color, light_contribution);
-                }
-            }
-        }
-
-        attenuation = vec3_mul_vec3(attenuation, hit.color);
-
-        let is_reflective = hit.reflectivity > random_f32();
-        if (is_reflective) {
-            let reflected_dir = reflect(current_ray.direction, hit.normal);
-            current_ray = Ray(hit.p, reflected_dir);
-        } else {
-            let scatter_direction = normalize(vec3_add(hit.normal, random_in_unit_sphere()));
-            current_ray = Ray(hit.p, scatter_direction);
         }
     }
     return accumulated_color;
 }
 
 @compute @workgroup_size(8, 8, 1)
-
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let x = global_id.x;
     let y = global_id.y;
@@ -384,11 +472,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         let direction = normalize(
             vec3_add(
-                vec3_mul(uniforms.camera_right, viewport_x),
                 vec3_add(
-                    vec3_mul(uniforms.camera_up, viewport_y),
-                    uniforms.camera_forward
-                )
+                    uniforms.camera_forward,
+                    vec3_mul(uniforms.camera_right, viewport_x)
+                ),
+                vec3_mul(uniforms.camera_up, viewport_y)
             )
         );
         let ray = Ray(uniforms.camera_pos, direction);
@@ -406,7 +494,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let variance_value = variance_vec.x + variance_vec.y + variance_vec.z; // Sum of RGB variances
     
     // Adaptive sampling: add more samples if variance is high
-    if (variance_value > 10.0 && base_samples < max_samples) {
+    if (variance_value > 1.0 && base_samples < max_samples) {
         let additional_samples = min(max_samples - base_samples, u32(variance_value * 50.0));
         
         for (var i = 0u; i < additional_samples; i = i + 1) {
@@ -422,11 +510,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             let direction = normalize(
                 vec3_add(
-                    vec3_mul(uniforms.camera_right, viewport_x),
                     vec3_add(
-                        vec3_mul(uniforms.camera_up, viewport_y),
-                        uniforms.camera_forward
-                    )
+                        uniforms.camera_forward,
+                        vec3_mul(uniforms.camera_right, viewport_x)
+                    ),
+                    vec3_mul(uniforms.camera_up, viewport_y)
                 )
             );
             let ray = Ray(uniforms.camera_pos, direction);
