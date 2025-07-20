@@ -1,7 +1,7 @@
 {
   "width": 400,
   "height": 200,
-  "samples_per_pixel": 128,
+  "samples_per_pixel": 16,
   "max_depth": 32,
   "frames_to_accumulate": 100000000,
   "camera": {
@@ -152,11 +152,11 @@
   ],
   "planes": [
     {
-      "point": [0.0, -1.0, -3.0],
+      "point": [0.0, -1.0, 0.0],
       "normal": [0.0, 1.0, 0.0],
-      "color": [0.5, 0.5, 0.5],
+      "color": [1.0, 1.0, 1.0],
       "emission": [0.0, 0.0, 0.0],
-      "reflectivity": 0.0
+      "reflectivity": 0.1
     }
   ]
 }

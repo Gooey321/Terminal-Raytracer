@@ -72,7 +72,6 @@ struct Uniforms {
     camera_forward: Vec3,
     camera_right: Vec3,
     camera_up: Vec3,
-    sun: SunConfig,
 };
 
 struct VarianceBuffer {

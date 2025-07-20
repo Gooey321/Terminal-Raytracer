@@ -43,17 +43,6 @@ impl Camera {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
-struct SunConfig {
-    direction: Vec3,
-    color: Vec3,
-    intensity: f32,
-    angular_size: f32,
-    _padding1: f32,
-    _padding2: f32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
 struct Uniforms {
     width: u32,
     height: u32,
@@ -71,7 +60,6 @@ struct Uniforms {
     camera_forward: Vec3,
     camera_right: Vec3,
     camera_up: Vec3,
-    sun: SunConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -212,14 +200,6 @@ async fn run(full_color: bool, verbose: bool) {
             _padding1: 0, _padding2: 0, aspect_ratio: 0.0, char_aspect_ratio: 0.0, fov_rad: 0.0,
             _padding3: 0.0, camera_pos: Vec3::new(0.0,0.0,0.0), camera_forward: Vec3::new(0.0,0.0,0.0),
             camera_right: Vec3::new(0.0,0.0,0.0), camera_up: Vec3::new(0.0,0.0,0.0),
-            sun: SunConfig {
-                direction: Vec3::new(0.0, 0.0, 0.0),
-                color: Vec3::new(0.0, 0.0, 0.0),
-                intensity: 0.0,
-                angular_size: 0.0,
-                _padding1: 0.0,
-                _padding2: 0.0,
-            }
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -352,14 +332,6 @@ async fn run(full_color: bool, verbose: bool) {
                 camera_forward: forward,
                 camera_right: right,
                 camera_up: up,
-                sun: SunConfig {
-                    direction: Vec3::new(-0.6, 0.8, -0.3), // Sun coming from upper left
-                    color: Vec3::new(1.0, 0.9, 0.7),       // Warm sun color
-                    intensity: 100.0,                         // Sun brightness
-                    angular_size: 0.2,                     // Sun size in radians (realistic)
-                    _padding1: 0.0,
-                    _padding2: 0.0,
-                },
             };
             
             // Update uniform buffer
@@ -380,8 +352,8 @@ async fn run(full_color: bool, verbose: bool) {
             
             frame_count += 1;
 
-            // Only display every 3rd frame or when accumulation is complete
-            if frame_count % 3 == 0 || frame_count >= scene.frames_to_accumulate {
+            // Only display every 5th frame or when accumulation is complete
+            if frame_count % 5 == 0 || frame_count >= scene.frames_to_accumulate {
                 // Copy final result to staging buffer and render
                 let mut display_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
                 display_encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_buffer_size);
@@ -410,16 +382,16 @@ async fn run(full_color: bool, verbose: bool) {
                 // Calculate average FPS
                 let avg_frame_time: Duration = frame_times.iter().sum::<Duration>() / frame_times.len() as u32;
                 let fps = 1.0 / avg_frame_time.as_secs_f64();
-                
-                // Calculate render time percentage (time spent actually rendering vs total frame time)
+
                 let render_time_ms = frame_duration.as_millis();
 
-                // Move cursor to top-left WITHOUT clearing screen
-                print!("\x1B[1;1H"); // Just move cursor, don't clear
+                // Move cursor to top-left
+                print!("\x1B[1;1H");
                 
                 // Build the entire frame in memory first
                 let mut frame_buffer = String::with_capacity((scene.width * scene.height * 20) as usize);
                 
+                // Render the pixel colors
                 for j in 0..scene.height {
                     for i in 0..scene.width {
                         let index = (j * scene.width + i) as usize;
@@ -443,7 +415,7 @@ async fn run(full_color: bool, verbose: bool) {
                 
                 // Enhanced status line with FPS
                 frame_buffer.push_str(&format!(
-                    "Frame: {}/{} | FPS: {:.1} | Render: {}ms | WASD: move, arrows: look, ESC: exit\x1B[K\r\n", 
+                    "Frame: {}/{} | FPS: {:.1} (only displaying every 5th frame)| Render: {}ms | WASD: move, arrows: look, ESC: exit\x1B[K\r\n", 
                     frame_count, 
                     scene.frames_to_accumulate,
                     fps,
