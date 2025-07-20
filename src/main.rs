@@ -121,7 +121,7 @@ async fn run(full_color: bool, verbose: bool) {
     let (terminal_width, terminal_height) = terminal::size().unwrap();
     
     // Adjust scene dimensions to fit terminal
-    let mut scene = load_scene("src/scenes/demo.json").expect("Failed to load scene");
+    let mut scene = load_scene("src/scenes/Cornell_Box.json").expect("Failed to load scene");
     
     // Ensure output fits in terminal
     scene.width = (terminal_width as u32).min(scene.width);
@@ -352,86 +352,81 @@ async fn run(full_color: bool, verbose: bool) {
             
             frame_count += 1;
 
-            // Only display every 5th frame or when accumulation is complete
-            if frame_count % 5 == 0 || frame_count >= scene.frames_to_accumulate {
-                // Copy final result to staging buffer and render
-                let mut display_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-                display_encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_buffer_size);
-                queue.submit(Some(display_encoder.finish()));
-                
-                let buffer_slice = staging_buffer.slice(..);
-                buffer_slice.map_async(wgpu::MapMode::Read, |result| {
-                    result.unwrap();
-                });
-                let _ = device.poll(wgpu::MaintainBase::Wait);
-                
-                let data = buffer_slice.get_mapped_range();
-                let colors: &[Vec3] = bytemuck::cast_slice(&data);
 
-                // Calculate frame rate
-                let current_time = Instant::now();
-                let frame_duration = current_time.duration_since(last_frame_time);
-                last_frame_time = current_time;
-                
-                // Store frame time and maintain rolling average
-                frame_times.push_back(frame_duration);
-                if frame_times.len() > max_frame_samples {
-                    frame_times.pop_front();
-                }
-                
-                // Calculate average FPS
-                let avg_frame_time: Duration = frame_times.iter().sum::<Duration>() / frame_times.len() as u32;
-                let fps = 1.0 / avg_frame_time.as_secs_f64();
+            // Copy final result to staging buffer and render
+            let mut display_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            display_encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_buffer_size);
+            queue.submit(Some(display_encoder.finish()));
+            
+            let buffer_slice = staging_buffer.slice(..);
+            buffer_slice.map_async(wgpu::MapMode::Read, |result| {
+                result.unwrap();
+            });
+            let _ = device.poll(wgpu::MaintainBase::Wait);
+            
+            let data = buffer_slice.get_mapped_range();
+            let colors: &[Vec3] = bytemuck::cast_slice(&data);
 
-                let render_time_ms = frame_duration.as_millis();
-
-                // Move cursor to top-left
-                print!("\x1B[1;1H");
-                
-                // Build the entire frame in memory first
-                let mut frame_buffer = String::with_capacity((scene.width * scene.height * 20) as usize);
-                
-                // Render the pixel colors
-                for j in 0..scene.height {
-                    for i in 0..scene.width {
-                        let index = (j * scene.width + i) as usize;
-                        let pixel_color = colors[index];
-                        
-                        let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-                        let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-                        let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-                        
-                        if full_color {
-                            frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b));
-                        } else {
-                            let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
-                            let chars = [' ', '.', ':', '-', '=', '+', '*', 'a', '#', '%', '@'];
-                            let index = (brightness.sqrt() * (chars.len() - 1) as f32).min((chars.len() - 1) as f32) as usize;
-                            frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, chars[index]));
-                        }
-                    }
-                    frame_buffer.push_str("\r\n");
-                }
-                
-                // Enhanced status line with FPS
-                frame_buffer.push_str(&format!(
-                    "Frame: {}/{} | FPS: {:.1} (only displaying every 5th frame)| Render: {}ms | WASD: move, arrows: look, ESC: exit\x1B[K\r\n", 
-                    frame_count, 
-                    scene.frames_to_accumulate,
-                    fps,
-                    render_time_ms
-                ));
-                
-                // Output entire frame at once
-                print!("{}", frame_buffer);
-                io::stdout().flush().unwrap();
-                
-                drop(data);
-                staging_buffer.unmap();
-            } else {
-                // For frames we don't display, just wait a bit to avoid spinning
-                std::thread::sleep(Duration::from_millis(1));
+            // Calculate frame rate
+            let current_time = Instant::now();
+            let frame_duration = current_time.duration_since(last_frame_time);
+            last_frame_time = current_time;
+            
+            // Store frame time and maintain rolling average
+            frame_times.push_back(frame_duration);
+            if frame_times.len() > max_frame_samples {
+                frame_times.pop_front();
             }
+            
+            // Calculate average FPS
+            let avg_frame_time: Duration = frame_times.iter().sum::<Duration>() / frame_times.len() as u32;
+            let fps = 1.0 / avg_frame_time.as_secs_f64();
+
+            let render_time_ms = frame_duration.as_millis();
+
+            // Move cursor to top-left
+            print!("\x1B[1;1H");
+            
+            // Build the entire frame in memory first
+            let mut frame_buffer = String::with_capacity((scene.width * scene.height * 20) as usize);
+            
+            // Render the pixel colors
+            for j in 0..scene.height {
+                for i in 0..scene.width {
+                    let index = (j * scene.width + i) as usize;
+                    let pixel_color = colors[index];
+                    
+                    let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                    let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                    let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                    
+                    if full_color {
+                        frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b));
+                    } else {
+                        let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
+                        let chars = [' ', '.', ':', '-', '=', '+', '*', 'a', '#', '%', '@'];
+                        let index = (brightness.sqrt() * (chars.len() - 1) as f32).min((chars.len() - 1) as f32) as usize;
+                        frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, chars[index]));
+                    }
+                }
+                frame_buffer.push_str("\r\n");
+            }
+            
+            // Enhanced status line with FPS
+            frame_buffer.push_str(&format!(
+                "Frame: {}/{} | FPS: {:.1} | Render: {}ms | WASD: move, arrows: look, ESC: exit\x1B[K\r\n", 
+                frame_count, 
+                scene.frames_to_accumulate,
+                fps,
+                render_time_ms
+            ));
+            
+            // Output entire frame at once
+            print!("{}", frame_buffer);
+            io::stdout().flush().unwrap();
+            
+            drop(data);
+            staging_buffer.unmap();
 
             camera_moved = false;
         } else {

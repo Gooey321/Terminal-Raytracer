@@ -3,7 +3,7 @@
   "height": 100,
   "samples_per_pixel": 32,
   "max_depth": 4,
-  "frames_to_accumulate": 100000000,
+  "frames_to_accumulate": 5000,
   "camera": {
     "fov_degrees": 45.0,
     "char_aspect_ratio": 0.55
