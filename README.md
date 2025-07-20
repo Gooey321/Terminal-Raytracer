@@ -1,6 +1,8 @@
 # Terminal Raytracer
 
-A high-performance, GPU-accelerated raytracer that renders 3D scenes directly in your terminal using ASCII characters or full-color Unicode blocks. Built with Rust and wgpu for real-time interactive rendering.
+A raytracer that renders 3D scenes directly in the terminal using ASCII characters or full-color Unicode blocks "█". Built with Rust and wgpu.
+
+Made for HackClubs Summer Of Hacking
 
 ## Features
 
