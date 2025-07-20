@@ -506,16 +506,26 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         let half_height = tan(f32(uniforms.fov_rad) / 2.0);
         let half_width = f32(uniforms.aspect_ratio) * half_height;
-        let viewport_x = half_width * (2.0 * u - 1.0);
-        let viewport_y = half_height * (2.0 * v - 1.0) / f32(uniforms.char_aspect_ratio);
 
+        // Convert screen coordinates to normalized device coordinates
+        let ndc_x = (2.0 * u - 1.0);
+        let ndc_y = (2.0 * v - 1.0) / f32(uniforms.char_aspect_ratio);
+
+        // Scale by the actual viewport size
+        let viewport_x = half_width * ndc_x;
+        let viewport_y = half_height * ndc_y;
+
+        // Create direction vector in camera space (z = 1 for perspective projection)
+        let camera_space_dir = Vec3(viewport_x, viewport_y, 1.0, 0.0);
+
+        // Transform to world space using camera basis vectors
         let direction = normalize(
             vec3_add(
-                vec3_mul(uniforms.camera_right, viewport_x),
                 vec3_add(
-                    vec3_mul(uniforms.camera_up, viewport_y),
-                    uniforms.camera_forward
-                )
+                    vec3_mul(uniforms.camera_right, camera_space_dir.x),
+                    vec3_mul(uniforms.camera_up, camera_space_dir.y)
+                ),
+                vec3_mul(uniforms.camera_forward, camera_space_dir.z)
             )
         );
         let ray = Ray(uniforms.camera_pos, direction);
@@ -544,16 +554,26 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             let half_height = tan(f32(uniforms.fov_rad) / 2.0);
             let half_width = f32(uniforms.aspect_ratio) * half_height;
-            let viewport_x = half_width * (2.0 * u - 1.0);
-            let viewport_y = half_height * (2.0 * v - 1.0) / f32(uniforms.char_aspect_ratio);
 
+            // Convert screen coordinates to normalized device coordinates
+            let ndc_x = (2.0 * u - 1.0);
+            let ndc_y = (2.0 * v - 1.0) / f32(uniforms.char_aspect_ratio);
+
+            // Scale by the actual viewport size
+            let viewport_x = half_width * ndc_x;
+            let viewport_y = half_height * ndc_y;
+
+            // Create direction vector in camera space (z = 1 for perspective projection)
+            let camera_space_dir = Vec3(viewport_x, viewport_y, 1.0, 0.0);
+
+            // Transform to world space using camera basis vectors
             let direction = normalize(
                 vec3_add(
-                    vec3_mul(uniforms.camera_right, viewport_x),
                     vec3_add(
-                        vec3_mul(uniforms.camera_up, viewport_y),
-                        uniforms.camera_forward
-                    )
+                        vec3_mul(uniforms.camera_right, camera_space_dir.x),
+                        vec3_mul(uniforms.camera_up, camera_space_dir.y)
+                    ),
+                    vec3_mul(uniforms.camera_forward, camera_space_dir.z)
                 )
             );
             let ray = Ray(uniforms.camera_pos, direction);

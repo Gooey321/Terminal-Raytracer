@@ -395,17 +395,22 @@ async fn run(full_color: bool, verbose: bool) {
                 for i in 0..scene.width {
                     let index = (j * scene.width + i) as usize;
                     let pixel_color = colors[index];
-                    
-                    let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-                    let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-                    let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
-                    
+
                     if full_color {
+                        let r = (pixel_color.x.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                        let g = (pixel_color.y.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
+                        let b = (pixel_color.z.sqrt() * 255.0).clamp(0.0, 255.0) as u8;
                         frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m█\x1b[0m", r, g, b));
                     } else {
+                        // Use different gamma correction for ASCII mode (lower gamma = brighter)
+                        let gamma = 0.3; // Much lower than the usual 0.5 (sqrt)
+                        let r = (pixel_color.x.powf(gamma) * 255.0).clamp(0.0, 255.0) as u8;
+                        let g = (pixel_color.y.powf(gamma) * 255.0).clamp(0.0, 255.0) as u8;
+                        let b = (pixel_color.z.powf(gamma) * 255.0).clamp(0.0, 255.0) as u8;
+                        
                         let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
                         let chars = [' ', '.', ':', '-', '=', '+', '*', 'a', '#', '%', '@'];
-                        let index = (brightness.sqrt() * (chars.len() - 1) as f32).min((chars.len() - 1) as f32) as usize;
+                        let index = (brightness.powf(gamma) * (chars.len() - 1) as f32).min((chars.len() - 1) as f32) as usize;
                         frame_buffer.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, chars[index]));
                     }
                 }

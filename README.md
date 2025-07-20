@@ -21,6 +21,9 @@ Made for HackClubs Summer Of Hacking
 
 - Rust (latest stable)
 - GPU with WGPU suppot
+- A really fast terminal (I used the Kitty Terminal, iTerm2 isn't fast enough)
+
+#### Note: Only tested on a Macbook Pro M3
 
 ### Build and Run
 
