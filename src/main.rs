@@ -110,19 +110,14 @@ struct TriangleConfig {
     reflectivity: f64,
 }
 
-fn load_scene(filename: &str) -> Result<SceneConfig, Box<dyn std::error::Error>> {
-    let file_content = std::fs::read_to_string(filename)?;
-    let scene: SceneConfig = serde_json::from_str(&file_content)?;
-    Ok(scene)
-}
-
 async fn run(full_color: bool, verbose: bool) {
     // Get terminal size to adjust output
     let (terminal_width, terminal_height) = terminal::size().unwrap();
     
-    // Adjust scene dimensions to fit terminal
-    let mut scene = load_scene("src/scenes/Cornell_Box.json").expect("Failed to load scene");
-    
+    let scene_content = include_str!("scenes/Cornell_Box.json");
+    let mut scene: SceneConfig = serde_json::from_str(scene_content)
+        .expect("Failed to parse embedded scene");
+
     // Ensure output fits in terminal
     scene.width = (terminal_width as u32).min(scene.width);
     scene.height = (terminal_height as u32 - 2).min(scene.height); // -2 for status lines
