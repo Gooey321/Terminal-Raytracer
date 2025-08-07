@@ -110,12 +110,17 @@ struct TriangleConfig {
     reflectivity: f64,
 }
 
-async fn run(full_color: bool, verbose: bool) {
+async fn run(full_color: bool, verbose: bool, scene_path: Option<&str>) {
     // Get terminal size to adjust output
     let (terminal_width, terminal_height) = terminal::size().unwrap();
     
-    let scene_content = include_str!("scenes/Cornell_Box.json");
-    let mut scene: SceneConfig = serde_json::from_str(scene_content)
+    let scene_content = match scene_path {
+        Some(path)=> std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("Failed to read scene file at '{}': {}", path, e)),
+        None => include_str!("scenes/Cornell_Box.json").to_string(),
+    };
+
+    let mut scene: SceneConfig = serde_json::from_str(&scene_content)
         .expect("Failed to parse embedded scene");
 
     // Ensure output fits in terminal
@@ -447,6 +452,9 @@ fn main() {
     // Fix argument parsing - you're running with "release" as first arg
     let full_color = args.iter().any(|arg| arg == "--full-color");
     let verbose = args.iter().any(|arg| arg == "--verbose");
+    let scene_path = args.iter()
+        .position(|arg| arg == "--path")
+        .and_then(|i| args.get(i + 1));
     
     if full_color { 
         println!("outputting with █ characters"); 
@@ -461,5 +469,5 @@ fn main() {
     }
 
     // Use pollster to run the async run function to completion.
-    pollster::block_on(run(full_color, verbose));
+    pollster::block_on(run(full_color, verbose, scene_path.map(String::as_str)));
 }
