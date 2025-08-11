@@ -3,14 +3,20 @@ name: Release
 on:
   push:
     tags:
-      - "v*.*.*" # Triggers on version tags like v1.0.0
+      - "v*.*.*"
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            asset_name: terminal-raytracer-linux
+          - os: macos-latest
+            asset_name: terminal-raytracer-macos
+          - os: windows-latest
+            asset_name: terminal-raytracer-windows.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -24,13 +30,19 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
+      - name: Rename binary (Unix)
+        if: runner.os != 'Windows'
+        run: mv target/release/terminal-raytracer target/release/${{ matrix.asset_name }}
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: mv target/release/terminal-raytracer.exe target/release/${{ matrix.asset_name }}
+
       - name: Upload binary as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: terminal-raytracer-${{ runner.os }}
-          path: |
-            target/release/terminal-raytracer*
-            !**/*.d
+          name: ${{ matrix.asset_name }}
+          path: target/release/${{ matrix.asset_name }}
 
   release:
     needs: build
