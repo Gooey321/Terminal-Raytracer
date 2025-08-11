@@ -35,10 +35,10 @@ cargo build --release
 cargo run --release
 
 # Run with full-color blocks
-cargo run --release -- --full-color
+cargo run --release -- --full-color --path "path/to/scene.json"
 
 # Enable verbose output
-cargo run --release -- --verbose
+cargo run --release -- --verbose --path "path/to/scene.json"
 ```
 
 ### Controls
