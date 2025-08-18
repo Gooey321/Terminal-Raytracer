@@ -32,7 +32,7 @@ Made for HackClubs Summer Of Hacking
 cargo build --release
 
 # Run with ASCII output
-cargo run --release
+cargo run --release --threads "how many cores you want to use"
 
 # Run with full-color blocks
 cargo run --release -- --full-color --path "path/to/scene.json"

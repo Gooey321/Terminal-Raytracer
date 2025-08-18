@@ -459,15 +459,13 @@ fn ray_color(initial_ray: Ray) -> Vec3 {
             let cos_theta = max(0.0, dot(hit.normal, scatter_direction));
             pdf = cos_theta / 3.14159265359; // PDF for cosine-weighted sampling
             
-            // For Lambertian surfaces: BRDF * cos(theta) / PDF
-            // BRDF = albedo/π, so: (albedo/π) * cos(theta) / (cos(theta)/π) = albedo
             attenuation = vec3_mul_vec3(attenuation, hit.color);
         }
         
-        current_ray = Ray(hit.p, scatter_direction);
+        current_ray = Ray(vec3_add(hit.p, vec3_mul(scatter_direction, 0.001)), scatter_direction);
 
         // Russian Roulette path termination for unbiased rendering
-        if (i > 2u) {
+        if (i > 3u) {
             let survival_prob = min(0.95, max(attenuation.x, max(attenuation.y, attenuation.z)));
             if (survival_prob < random_f32()) {
                 break;
