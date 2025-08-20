@@ -19,33 +19,69 @@ Made for HackClubs Summer Of Hacking
 
 ### Prerequisites
 
-- Rust (latest stable)
-- GPU with WGPU suppot
-- A really fast terminal (I used the Kitty Terminal, iTerm2 isn't fast enough)
+- Rust (latest stable) — https://rustup.rs
+- A GPU supported by wgpu (Metal on macOS, Vulkan/DirectX on Linux/Windows)
+- A modern terminal with truecolor (24-bit) support; disable heavy transparency for best results
 
-#### Note: Only tested on a Macbook Pro M3
+### Screenshots
 
-### Build and Run
+![Cornell Box Render](screenshots/cornellboxdifang.png)
+![Cornell Box Different Angle](screenshots/fullblock.png)
+![Triangle and Sphere](screenshots/trianglesphere.png)
+
+> Note: This project has been developed and tested on macOS (Apple Silicon). It should work on other platforms with a compatible GPU/WGPU backend.
+
+### Build
+
+Clone the repository and build the release binary:
 
 ```bash
-# Clone and build
+git clone https://github.com/Gooey321/Terminal-Raytracer.git
+cd Terminal-Raytracer
 cargo build --release
-
-# Run with ASCII output
-cargo run --release --threads "how many cores you want to use"
-
-# Run with full-color blocks
-cargo run --release -- --full-color --path "path/to/scene.json"
-
-# Enable verbose output
-cargo run --release -- --verbose --path "path/to/scene.json"
 ```
+
+### Run
+
+Usage examples (run from the repo root):
+
+- Run with ASCII output using N threads (defaults to available CPU cores):
+
+```bash
+cargo run --release -- --threads 4
+```
+
+- Run with full-color block characters (truecolor required):
+
+```bash
+cargo run --release -- --full-color --path "src/scenes/Cornell_Box.json"
+```
+
+- Enable verbose output for debugging and performance timing:
+
+```bash
+cargo run --release -- --verbose --path "src/scenes/Cornell_Box.json"
+```
+
+Command-line options supported:
+
+- `--full-color` : render using 24-bit color block characters (`█`) instead of ASCII
+- `--threads N` : set rayon thread pool size (defaults to available logical cores)
+- `--path <file>`: load a scene JSON file from disk (defaults to `src/scenes/Cornell_Box.json`)
+- `--verbose` : print debug / timing information
+
+### Terminal tips
+
+- Use the alternate screen buffer (the program enters it automatically if supported) to avoid scrolling artifacts.
+- Pick a dark, near‑black background (e.g. `#0F1115`) rather than pure black to preserve shadow detail.
+- Ensure your terminal supports truecolor (24‑bit) for the best full‑color output. Examples: iTerm2, Alacritty, Windows Terminal.
+- If output looks slow at large resolutions, reduce terminal size or samples per pixel in the scene JSON.
 
 ### Controls
 
-- **WASD**: Move camera (forward/back/left/right)
-- **Arrow keys**: Look around (pitch/yaw)
-- **ESC**: Exit
+- `W`, `A`, `S`, `D` — move camera (forward/back/left/right)
+- Arrow keys — look around (pitch/yaw)
+- `ESC` — exit
 
 ## Scene Configuration
 
@@ -59,7 +95,7 @@ Scenes are defined in JSON in [`src/scenes/`](src/scenes/). Each scene can conta
   "height": 200,
   "samples_per_pixel": 16,
   "max_depth": 32,
-  "frames_to_accumulate": 100000000,
+  "frames_to_accumulate": 100,
   "camera": {
     "fov_degrees": 50.0,
     "char_aspect_ratio": 0.55

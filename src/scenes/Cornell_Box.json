@@ -1,6 +1,6 @@
 {
-  "width": 200,
-  "height": 100,
+  "width": 400,
+  "height": 200,
   "samples_per_pixel": 128,
   "max_depth": 3,
   "frames_to_accumulate": 100000000,
