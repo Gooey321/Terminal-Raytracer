@@ -518,7 +518,7 @@ pub async fn run(full_color: bool, verbose: bool, scene_path: Option<&str>) {
                         let b = (pixel_color.z.powf(gamma) * 255.0).clamp(0.0, 255.0) as u8;
 
                         let brightness = 0.2126 * pixel_color.x + 0.7152 * pixel_color.y + 0.0722 * pixel_color.z;
-                        let chars = [' ', '.', '\'', '`', '^', '"', ',', ':', ';', 'I', 'l', '!', 'i', '>', '<', '~', '+', '_', '-', '?', ']', '[', '}', '{', '1', ')', '(', '|', '\\', '/', 't', 'f', 'j', 'r', 'x', 'n', 'u', 'v', 'c', 'z', 'X', 'Y', 'U', 'J', 'C', 'L', 'Q', '0', 'O', 'Z', 'm', 'w', 'q', 'p', 'd', 'b', 'k', 'h', 'a', 'o', '*', '#', 'M', 'W', '&', '8', '%', 'B', '@', '$'];
+                        let chars = [' ', '.', '`', '^', '"', ',', ':', ';', 'I', 'l', '!', 'i', '>', '<', '~', '+', '_', '-', '?', ']', '[', '}', '{', '1', ')', '(', '|', '\\', 't', 'f', 'j', 'r', 'x', 'n', 'u', 'v', 'c', 'z', 'X', 'Y', 'U', 'J', 'C', 'L', 'Q', '0', 'O', 'Z', 'm', 'w', 'q', 'p', 'd', 'b', 'k', 'h', 'a', 'o', '*', '#', 'M', 'W', '&', '8', '%', 'B', '@', '$'];
                         let ci = (brightness.powf(gamma) * (chars.len() - 1) as f32)
                             .min((chars.len() - 1) as f32) as usize;
                         let _ = write!(row, "\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, chars[ci]);
@@ -534,30 +534,29 @@ pub async fn run(full_color: bool, verbose: bool, scene_path: Option<&str>) {
             let cpu_done_time = Instant::now();
             let cpu_time_ms = (cpu_done_time.duration_since(cpu_start)).as_millis();
             
-            let io_start = Instant::now();
-            print!("{}", frame_buffer);
-            io::stdout().flush().unwrap();
-            let io_time = io_start.elapsed().as_millis();
-
             let cleanup_start = Instant::now();
             drop(data);
             staging_buffer.unmap();
             let cleanup_time = cleanup_start.elapsed().as_millis();
 
-            let total_frame_time = total_frame_start.elapsed().as_millis();
-            let unaccounted = total_frame_time.saturating_sub(gpu_time_ms + cpu_time_ms + io_time + cleanup_time);
+            // Output the entire completed frame
+            let io_start = Instant::now();
+            print!("{}", frame_buffer);
+            io::stdout().flush().unwrap();
+            let io_time = io_start.elapsed().as_millis();
 
-            // Add to status line:
-            frame_buffer.push_str(&format!(
-                "Frame: {}/{} | FPS: {:.1} | GPU: {}ms | CPU: {}ms | IO: {}ms | Other: {}ms | Total: {}ms\n",
+            let total_frame_time = total_frame_start.elapsed().as_millis();
+            let unaccounted = total_frame_time.saturating_sub(gpu_time_ms + cpu_time_ms + cleanup_time + io_time);
+
+            let status_line = format!(
+                "Frame: {}/{} | FPS: {:.1} | GPU: {}ms | CPU: {}ms | Cleanup: {}ms | Other: {}ms | Total: {}ms\r\n",
                 frame_count, scene.frames_to_accumulate, fps,
-                gpu_time_ms, cpu_time_ms, io_time, unaccounted, total_frame_time
-            ));
-            
-             // Output entire frame at once
-             print!("{}", frame_buffer);
-             io::stdout().flush().unwrap();
-            
+                gpu_time_ms, cpu_time_ms, cleanup_time, unaccounted, total_frame_time
+            );
+
+            print!("\x1B[{};1H{}", scene.height + 1, status_line);
+            io::stdout().flush().unwrap();
+
             camera_moved = false;
         } else {
             // If accumulation is finished, just wait for input
