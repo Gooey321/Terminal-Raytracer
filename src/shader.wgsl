@@ -51,14 +51,17 @@ struct Uniforms {
     height: u32,
     samples_per_pixel: u32,
     max_depth: u32,
+
     seed: u32,
     frame_number: u32,
-    _padding1: u32,
-    _padding2: u32,
+    primitive_count: u32,
+    _padding0: u32, // Pad to 16 bytes
+
     aspect_ratio: f32,
     char_aspect_ratio: f32,
     fov_rad: f32,
-    _padding3: f32,
+    _padding1: f32, // Pad to 16 bytes
+
     camera_pos: Vec3,
     camera_forward: Vec3,
     camera_right: Vec3,
@@ -150,20 +153,20 @@ fn sample_light_direction(hit_point: Vec3, primitive: Primitive) -> Vec3 {
 
 // Ray-sphere intersection
 fn hit_sphere(ray: Ray, primitive: Primitive, t_min: f32, t_max: f32) -> f32 {
+    // assume ray.direction is normalized -> a = 1.0
     let oc = vec3_sub(primitive.sphere_center, ray.origin);
-    let a = dot(ray.direction, ray.direction);
     let h = dot(ray.direction, oc);
     let c = dot(oc, oc) - primitive.sphere_radius * primitive.sphere_radius;
-    let discriminant = h * h - a * c;
+    let discriminant = h * h - c;
 
     if (discriminant < 0.0) {
         return -1.0;
     }
 
     let sqrtd = sqrt(discriminant);
-    var root = (h - sqrtd) / a;
+    var root = h - sqrtd;
     if (root <= t_min || t_max <= root) {
-        root = (h + sqrtd) / a;
+        root = h + sqrtd;
         if (root <= t_min || t_max <= root) {
             return -1.0;
         }
@@ -247,12 +250,26 @@ fn hit_scene(ray: Ray, t_min: f32, t_max: f32) -> HitRecord {
     var hit: HitRecord;
     hit.t = -1.0;
 
-    for (var i = 0u; i < arrayLength(&primitives); i = i + 1) {
+    // use primitive count from uniforms instead of arrayLength()
+    for (var i = 0u; i < uniforms.primitive_count; i = i + 1) {
         let primitive = primitives[i];
         var t = -1.0;
         
         if (primitive.primitive_type == 0u) { // Sphere
-            t = hit_sphere(ray, primitive, t_min, closest_so_far);
+            // cheap squared-distance reject (no sqrt, no division)
+            let to_center = vec3_sub(primitive.sphere_center, ray.origin);
+            let t_ca = dot(to_center, ray.direction); // assumes normalized ray.direction
+            // squared distance from ray to center
+            let dist2 = dot(to_center, to_center) - t_ca * t_ca;
+            let r2 = primitive.sphere_radius * primitive.sphere_radius;
+
+            // If the ray misses sphere (dist2 > r^2) OR sphere is fully behind t_min OR
+            // sphere nearest approach minus radius is beyond current closest, skip expensive intersect.
+            if (dist2 > r2 || t_ca + primitive.sphere_radius < t_min || t_ca - primitive.sphere_radius > closest_so_far) {
+                t = -1.0;
+            } else {
+                t = hit_sphere(ray, primitive, t_min, closest_so_far);
+            }
         } else if (primitive.primitive_type == 1u) { // Plane
             t = hit_plane(ray, primitive, t_min, closest_so_far);
         } else if (primitive.primitive_type == 2u) { // Triangle
@@ -322,7 +339,7 @@ fn sample_direct_lighting(hit_point: Vec3, normal: Vec3, material_color: Vec3, a
     var direct_light = Vec3(0.0, 0.0, 0.0, 0.0);
     
     // Sample each light source
-    for (var i = 0u; i < arrayLength(&primitives); i = i + 1) {
+    for (var i = 0u; i < uniforms.primitive_count; i = i + 1) {
         let primitive = primitives[i];
         
         // Check if primitive is emissive (light source)
